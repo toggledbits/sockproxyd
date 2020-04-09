@@ -48,19 +48,32 @@ remote host and enter echo mode. The _pid_ in the greeting is the connection ide
 passed as the "Pid" parameter on action requests/notifications (unless changed by NTFY).
 
 Once in echo mode, the proxy passes data between the client connection (between the Vera device
-and the proxy) and the remote connection (between the proxy and the other endpoint). This con-
-tinues until either end closes the connection or an error occurs. Closure of connections is al-
-ways symmetrical: if the remote closes, the client closes; if the client closes, the remote
+and the proxy) and the remote connection (between the proxy and the other endpoint). This continues until either end closes the connection or an error occurs. Closure of connections is always symmetrical: if the remote closes, the client closes; if the client closes, the remote
 closes. This assures that a client is not communicating to nothing, and that the proxy behaves
 as much like a direct connection as possible. This means that the proxy should be transparent
-to WSAPI, etc.
+to WSAPI, etc. Closure of the connection causes a final notification, so that the Luup device/plugin can detect the closure immediately.
 
 The proxy's setup mode includes a couple of commands to help humans that connect to it:
-    STAT            Shows the status of all connections the proxy is managing.
-    CAPA            Shows the capabilities of this version of the proxy (also machine-readable)
-    QUIT            Disconnect the current connection from the proxy.
-    STOP            Close all connections and stop the proxy daemon.
-    HELP            Print command help.
+    STAT    Shows the status of all connections the proxy is managing.
+    CAPA    Shows the capabilities of this version of the proxy (also machine-readable)
+    QUIT    Disconnect the current connection from the proxy.
+    STOP    Close all connections and stop the proxy daemon.
+    HELP    Print command help.
+
+Here's a typical "human" session with the proxy:
+
+```
+$ nc -v 127.0.0.1 2504
+Connection to 127.0.0.1 2504 port [tcp/*] succeeded!
+OK TOGGLEDBITS-SOCKPROXY 1 171604c1480
+STAT
+ ID               St Client           Remote           -rx/-tx dev.sid/act pid
+*171604c1480      1  127.0.0.1                         0rx/0tx 0./ 171604c1480
+ 171604b2250      2  192.168.0.20     192.168.0.7:10006 542rx/162tx 659.urn:toggledbits-com:serviceId:HTDLC1/HandleReceive 0
+  171604d50b7      2  192.168.0.136    192.168.0.15:25  585rx/17tx 0./ 171604d50b7
+QUIT
+OK QUIT
+```
 
 ## Starting sockproxyd
 
