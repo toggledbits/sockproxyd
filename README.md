@@ -15,11 +15,11 @@ commands can be sent (all commands must be terminated with newline):
     BLKS nbytes             Set the network block size to nbytes. The default is 2048. Messages
                             larger than the network block size are received nbytes chunks. It is
                             usually not necessary to change this.
-    NTFY dev sid act pid    Set the device, serviceID, and action to be used for notification
+    NTFY dev sid act [pid]  Set the device, serviceID, and action to be used for notification
                             of waiting receive data. If not used, no notification is invoked.
-                            The optional "pid" can be used as an identifier for each connection
-                            if a client device has multiple connections through the proxy (i.e.
-                            it tells you which connection has available data).
+                            The optional "pid" (string) can be used as an identifier for each conn-
+                            ection if a client device has multiple connections through the proxy
+                            (i.e. it tells you which connection has available data).
     PACE seconds            Limits the pace with which received-data notifications are sent
                             to not more than once every "seconds" seconds. Default: 0, waiting
                             received sends an immediate notification. If a number of datagrams
@@ -32,7 +32,7 @@ commands can be sent (all commands must be terminated with newline):
     CONN host:port options  Connects (TCP) to host:port, and enters "echo mode". This should
                             always be the last setup command issued; it is not possible to issue
                             other setup commands after connecting to the remote host. The options
-                            can by any of RTIM, PACE, BLKS, or NTFY written as key value pairs,
+                            can be any of RTIM, PACE, BLKS, or NTFY written as key value pairs,
                             for example: 
                             
                             CONN 192.168.0.2:25 BLKS=514 PACE=1 NTFY=659/urn:toggledbits-com:serviceId:Example1/HandleReceive/0
@@ -51,7 +51,7 @@ Once in echo mode, the proxy passes data between the client connection (between 
 and the proxy) and the remote connection (between the proxy and the other endpoint). This continues until either end closes the connection or an error occurs. Closure of connections is always symmetrical: if the remote closes, the client closes; if the client closes, the remote
 closes. This assures that a client is not communicating to nothing, and that the proxy behaves
 as much like a direct connection as possible. This means that the proxy should be transparent
-to WSAPI, etc. Closure of the connection causes a final notification, so that the Luup device/plugin can detect the closure immediately.
+to WSAPI, etc. Any shutdown of the connection causes a final notification, so that the Luup device/plugin can detect the closure immediately.
 
 The proxy's setup mode includes a couple of commands to help humans that connect to it:
     STAT    Shows the status of all connections the proxy is managing.
@@ -79,19 +79,19 @@ The above shows three connections. The first line shows a connection from a Vera
 
 ## Starting sockproxyd
 
-The daemon is meant to be started at system startup (e.g. from /etc/init.d on legacy Veras).
+The daemon is meant to be started at system startup (e.g. from `/etc/init.d` on legacy Veras).
 
 The following command line options are supported:
 
     -a _address_    The address on which to bind (default: *, all addresses/interfaces)
     -p _port_       The port to listen on for proxy connections (default: 2504)
-    -L _logfile_    The log file to use
+    -L _logfile_    The log file to use (default: stderr)
     -N _url_        The base URL for reaching the Luup system (default: http://127.0.0.1:3480)
-    -D              Enable debug logging
+    -D              Enable debug logging (default: debug off)
 
 ## Adapting Plugins/Applications
 
-Here's a typical method for connecting to a remote host:
+Here's a typical method for connecting directly to a remote host in the usual way:
 
 ```
 function connect( ip, port )
