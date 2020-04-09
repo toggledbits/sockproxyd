@@ -70,10 +70,12 @@ STAT
  ID               St Client           Remote           -rx/-tx dev.sid/act pid
 *171604c1480      1  127.0.0.1                         0rx/0tx 0./ 171604c1480
  171604b2250      2  192.168.0.20     192.168.0.7:10006 542rx/162tx 659.urn:toggledbits-com:serviceId:HTDLC1/HandleReceive 0
-  171604d50b7      2  192.168.0.136    192.168.0.15:25  585rx/17tx 0./ 171604d50b7
+ 171604d50b7      2  192.168.0.20     192.168.0.15:25  585rx/17tx 601.urn:toggledbits-com:serviceId:MailSensor1/NotifyData 171604d50b7
 QUIT
 OK QUIT
 ```
+
+The above status shows three connections. The connection with the "*" to the left of its ID is the current connection (on which the STAT command was run). The second line is a connection from a Vera host to an HTD gateway on port 10006. The third line shows a connection from a Vera host to an email server on port 25. Notice the two Vera connections have different device/service/actions.
 
 ## Starting sockproxyd
 
