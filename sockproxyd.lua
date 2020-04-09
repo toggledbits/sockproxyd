@@ -342,10 +342,13 @@ function handleClientData( client, data )
 			return true
 		elseif cmd == "STAT" then
 			-- STAT(US)
-			local f = "%s%-16s %-2s %-16s %-16s %srx/%stx %s.%s/%s %s\n"
-			local l = string.format( f, " ", "ID", "St", "Client", "Remote", "-", "-", "dev", "sid", "act", "pid" )
+			local f = "%s%-16s %-2s %-16s %-21s %6s %6s %s\n"
+			local l = string.format( f, " ", "ID", "St", "Client", "Remote", "#recv", "#xmit", "Notify" )
 			client.sock:send( l )
 			for _,cl in pairs( clients ) do
+				local nt = ( cl.device or -1 ) > 0 and
+					( cl.device .. "/" .. ( cl.service or DEFAULT_SERVICE ) .. "/" .. 
+						( cl.action or DEFAULT_ACTION ) .. "/" .. cl.pid ) or ""
 				l = string.format( f,
 					( client.id == cl.id ) and "*" or " ",
 					cl.id,
@@ -354,10 +357,7 @@ function handleClientData( client, data )
 					cl.remotehost or "",
 					cl.remote_received or 0,
 					cl.remote_sent or 0,
-					cl.device or 0,
-					cl.service or "",
-					cl.action or "",
-					cl.pid
+					nt
 					)
 				client.sock:send( l )
 			end

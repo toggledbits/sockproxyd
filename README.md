@@ -65,17 +65,17 @@ Here's a typical "human" session with the proxy:
 ```
 $ nc -v 127.0.0.1 2504
 Connection to 127.0.0.1 2504 port [tcp/*] succeeded!
-OK TOGGLEDBITS-SOCKPROXY 1 171604c1480
+OK TOGGLEDBITS-SOCKPROXY 1 1716058a203
 STAT
- ID               St Client           Remote           -rx/-tx dev.sid/act pid
-*171604c1480      1  127.0.0.1                         0rx/0tx 0./ 171604c1480
- 171604b2250      2  192.168.0.20     192.168.0.7:10006 542rx/162tx 659.urn:toggledbits-com:serviceId:HTDLC1/HandleReceive 0
- 171604d50b7      2  192.168.0.20     192.168.0.15:25  585rx/17tx 601.urn:toggledbits-com:serviceId:MailSensor1/NotifyData 171604d50b7
+ ID               St Client           Remote              #recv   #xmit Notify
+ 1716057f6c0      2  192.168.0.20     192.168.0.15:25      1449      27 601.urn:toggledbits-com:serviceId:MailSensor1/NotifyData/171604d50b7
+*1716058a203      1  127.0.0.1                                0       0
+ 17160581a1f      2  192.168.0.20     192.168.0.7:10006     584     174 659/urn:toggledbits-com:serviceId:HTDLC1/HandleReceive/0
 QUIT
 OK QUIT
 ```
 
-The above status shows three connections. The connection with the "*" to the left of its ID is the current connection (on which the STAT command was run). The second line is a connection from a Vera host to an HTD gateway on port 10006. The third line shows a connection from a Vera host to an email server on port 25. Notice the two Vera connections have different device/service/actions.
+The above shows three connections. The first line shows a connection from a Vera host to an email server on port 25. The second line with the "*" to the left of its ID is the current connection (on which the STAT command was run). The third line is a connection from a Vera host to an HTD gateway on port 10006. Notice the two Vera connections have different device/service/actions for notification.
 
 ## Starting sockproxyd
 
