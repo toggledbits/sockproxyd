@@ -36,15 +36,20 @@
 								period of time. That is, if the pace is 2 seconds, the plugin should
 								loop attempting to read data for 2 seconds (at least) when notified,
 								in case more data comes in during the notification pause.
-		CONN host:port			Connects (TCP) to host:port, and enters "echo mode". This should
+		CONN host:port options	Connects (TCP) to host:port, and enters "echo mode". This should
 								always be the last setup command issued; it is not possible to issue
-								other setup commands after connecting to the remote host.
+								other setup commands after connecting to the remote host. The options
+								can by any of RTIM, PACE, BLKS, or NTFY written as key value pairs,
+								for example: CONN 192.168.0.2:25 BLKS=514 PACE=1
+								This accomplishes multiple commands on a single line and makes it easier
+								to adapt the proxy to existing applications.
 
 	When a host first connects to the proxy, the initial greeting is sent. This greeting is always
-	"OK TOGGLEDBITS-SOCKPROXY n", where N is the integer version number of the proxy. If your plug-
-	in can work with different versions of the proxy, you can parse out the version number. The
+	"OK TOGGLEDBITS-SOCKPROXY n pid", where N is the integer version number of the proxy. If your
+	plugin can work with different versions of the proxy, you can parse out the version number. The
 	host can then issue any necessary setup commands, and end with the CONN command to connect the
-	remote host and enter echo mode.
+	remote host and enter echo mode. The "pid" is the connection identfier, which by default will be 
+	passed as the "Pid" parameter on action requests/notifications (unless changed by NTFY).
 
 	Once in echo mode, the proxy passes data between the client connection (between the Vera device
 	and the proxy) and the remote connection (between the proxy and the other endpoint). This con-
@@ -68,7 +73,7 @@
 		-a address		The address on which to bind (default: *, all addresses/interfaces)
 		-p port			The port to listen on for proxy connections (default: DEFAULT_PORT)
 		-L logfile		The log file to use
-		-V url			The base URL for reaching the Luup system (default: http://127.0.0.1:3480)
+		-N url			The base URL for reaching the Luup system (default: http://127.0.0.1:3480)
 		-D				Debug mode
 --]]
 
@@ -291,9 +296,11 @@ function handleClientData( client, data )
 			for _,opt in ipairs( opts ) do
 				local k,v = opt:match( "^([^=]+)=(.*)" )
 				if k == "RTIM" then
-					client.remotetimeout = tonumber(k) or client.remotetimeout
+					client.remotetimeout = tonumber(v) or client.remotetimeout
+				elseif k == "BLKS" then
+					client.block = tonumber(v) or client.block
 				elseif k == "PACE" then
-					client.notifypace = tonumber(k) or client.notifypace
+					client.notifypace = tonumber(v) or client.notifypace
 				elseif k == "NTFY" then
 					local args = split( v, "/" )
 					client.device = tonumber( args[1] ) or -1
@@ -520,7 +527,7 @@ function main( arg )
 			local f,ferr = io.open( log, "a" )
 			if not f then error(logName..": "..ferr) end
 			logFile = f
-		elseif aa == "-V" then
+		elseif aa == "-N" or aa == "-V" then
 			vera = table.remove( arg, 1 ) or vera
 		else
 			error("Unrecognized command line argument: "..aa)
