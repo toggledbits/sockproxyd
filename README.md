@@ -33,7 +33,10 @@ commands can be sent:
                             always be the last setup command issued; it is not possible to issue
                             other setup commands after connecting to the remote host. The options
                             can by any of RTIM, PACE, BLKS, or NTFY written as key value pairs,
-                            for example: CONN 192.168.0.2:25 BLKS=514 PACE=1
+                            for example: 
+                            
+                            CONN 192.168.0.2:25 BLKS=514 PACE=1 NTFY=659/urn:toggledbits-com:serviceId:Example1/HandleReceive/0
+                            
                             This accomplishes multiple commands on a single line and makes it easier
                             to adapt the proxy to existing applications.
 
