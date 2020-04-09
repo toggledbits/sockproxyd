@@ -74,6 +74,52 @@ The following command line options are supported:
     -N _url_        The base URL for reaching the Luup system (default: http://127.0.0.1:3480)
     -D              Enable debug logging
 
+## Adapting Plugins/Applications
+
+Here's a typical method for connecting to a remote host:
+
+```
+function connect( ip, port )
+	local socket = require "socket"
+	local sock = socket.tcp()
+	sock:settimeout( 5 )
+	if sock:connect( ip, port ) then
+		return true, sock
+	end
+	sock:close()
+	return nil -- failed to connect
+end
+```
+
+Here's the same function, modified to try the proxy connection first. The proxy is assumed to be running on `localhost` with the default port (2504):
+
+```
+function connect( ip, port )
+	local socket = require "socket"
+	local sock = socket.tcp()
+	sock:settimeout( 5 )
+	if sock:connect( "127.0.0.1", 2504 ) then
+		sock:settimeout( 2 )
+		sock:send( "CONN "..ip..":"..port.."\n" )
+		local ans = sock:receive( "*l" )
+		if ans:match( "^OK CONN" ) then
+			-- Socket connected to proxy, and proxy is connected to remote in echo mode
+			return true, sock
+		end
+		-- Unhappy handshake; close and get new socket for direct connection
+		sock:shutdown("both")
+		sock:close()
+		sock = socket.tcp()
+	end
+	-- Try direct connection
+	if sock:connect( ip, port ) then
+		return true, sock
+	end
+	sock:close()
+	return nil -- failed to connect
+end
+```
+
 ## LICENSE
 
 sockproxyd is offered under GPLv3.
