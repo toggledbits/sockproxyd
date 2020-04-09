@@ -7,7 +7,7 @@ The proxy is meant to run as a background task on the system, started before Lua
 ## Using the Proxy
 
 When first connecting to the proxy, it is in "setup mode". In this mode, a small set of
-commands can be sent:
+commands can be sent (all commands must be terminated with newline):
 
     RTIM ms                 Receive timeout in milliseconds. If data is not received from the
                             remote for longer than this period, the remote is disconnected. The
@@ -83,6 +83,7 @@ function connect( ip, port )
 	local socket = require "socket"
 	local sock = socket.tcp()
 	sock:settimeout( 5 )
+	-- Connect directly to target
 	if sock:connect( ip, port ) then
 		return true, sock
 	end
@@ -98,9 +99,11 @@ function connect( ip, port )
 	local socket = require "socket"
 	local sock = socket.tcp()
 	sock:settimeout( 5 )
+	-- Try proxy connection
 	if sock:connect( "127.0.0.1", 2504 ) then
+		-- Accepted connection, connect proxy to target and go into echo mode
 		sock:settimeout( 2 )
-		sock:send( "CONN "..ip..":"..port.."\n" )
+		sock:send( string.format( "CONN %s:%s\n", ip, port ) )
 		local ans = sock:receive( "*l" )
 		if ans:match( "^OK CONN" ) then
 			-- Socket connected to proxy, and proxy is connected to remote in echo mode
@@ -111,7 +114,7 @@ function connect( ip, port )
 		sock:close()
 		sock = socket.tcp()
 	end
-	-- Try direct connection
+	-- Connect directly to target
 	if sock:connect( ip, port ) then
 		return true, sock
 	end
