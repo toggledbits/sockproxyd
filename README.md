@@ -12,7 +12,7 @@ commands can be sent (all commands must be terminated with newline):
     RTIM ms                 Receive timeout in milliseconds. If data is not received from the
                             remote for longer than this period, the remote is disconnected. The
                             default is 0, meaning no timeout is enforced.
-    BLKS nbytes             Set the network block size to nbytes. The default is DEFAULT_BLOCKSIZE. Messages
+    BLKS nbytes             Set the network block size to nbytes. The default is 2048. Messages
                             larger than the network block size are received nbytes chunks. It is
                             usually not necessary to change this.
     NTFY dev sid act pid    Set the device, serviceID, and action to be used for notification
@@ -41,10 +41,10 @@ commands can be sent (all commands must be terminated with newline):
                             to adapt the proxy to existing applications.
 
 When a host first connects to the proxy, the initial greeting is sent. This greeting is always
-"OK TOGGLEDBITS-SOCKPROXY n pid", where N is the integer version number of the proxy. If your
+`OK TOGGLEDBITS-SOCKPROXY n pid`, where _n_ is the integer version number of the proxy. If your
 plugin can work with different versions of the proxy, you can parse out the version number. The
 host can then issue any necessary setup commands, and end with the CONN command to connect the
-remote host and enter echo mode. The "pid" is the connection identfier, which by default will be 
+remote host and enter echo mode. The _pid_ in the greeting is the connection identfier, which by default will be 
 passed as the "Pid" parameter on action requests/notifications (unless changed by NTFY).
 
 Once in echo mode, the proxy passes data between the client connection (between the Vera device
@@ -69,7 +69,7 @@ The daemon is meant to be started at system startup (e.g. from /etc/init.d on le
 The following command line options are supported:
 
     -a _address_    The address on which to bind (default: *, all addresses/interfaces)
-    -p _port_       The port to listen on for proxy connections (default: DEFAULT_PORT)
+    -p _port_       The port to listen on for proxy connections (default: 2504)
     -L _logfile_    The log file to use
     -N _url_        The base URL for reaching the Luup system (default: http://127.0.0.1:3480)
     -D              Enable debug logging
@@ -122,6 +122,8 @@ function connect( ip, port )
 	return nil -- failed to connect
 end
 ```
+
+The above `CONN` command is abbreviated for clarity; it would normally include at least a `NTFY` option to specify the device and action (with service ID) to receive notifications of ready data.
 
 ## LICENSE
 

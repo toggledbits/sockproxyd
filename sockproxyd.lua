@@ -400,8 +400,8 @@ CAPA - Capabilities
 RTIM n - Remote receive timeout n milliseconds (default 0=no timeout)
 PACE n - Limit pace of receive data notifications (default 0=no pacing)
 BLKS n - Set max packet size to n (default DEFAULT_BLOCKSIZE)
-NTFY dev sid action pid - Set Luup action request parameters
-CONN host:port - Connect to remote (enters echo mode, must be last command)
+NTFY dev sid action [pid] - Set Luup action request parameters
+CONN host:port [key=value ...] - Connect to remote (enters echo mode, must be last command)
 ]] )
 			return true
 		elseif cmd == "CAPA" then
