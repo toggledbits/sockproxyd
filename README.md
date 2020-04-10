@@ -28,19 +28,20 @@ The CONN command is really the main command for the proxy, and is likely the onl
                             larger than the network block size are received nbytes chunks. It is
                             usually not necessary to change this.
     NTFY=dev/sid/act[/pid]  Set the device, serviceID, and action to be used for notification
-                            of waiting receive data. If not used, no notification is invoked.
+                            of waiting receive data. If not used, no notification action is invoked.
                             The optional "pid" (string) can be used as an identifier for each conn-
                             ection if a client device has multiple connections through the proxy
-                            (i.e. it tells you which connection has available data).
+                            (i.e. it tells you which connection has available data). See the
+                            "Multiple Connections" section below for more information about that.
     PACE=seconds            Limits the pace with which received-data notifications are sent
                             to not more than once every "seconds" seconds. Default: 0, waiting
-                            received sends an immediate notification. If a number of datagrams
-                            are received in a short time, this can result in the proxy "spamming"
-                            the plugin/device. Setting the frequency higher prevents this, but
-                            then requires the plugin/device to scan for further data for an equal
-                            period of time. That is, if the pace is 2 seconds, the plugin should
-                            loop attempting to read data for 2 seconds (at least) when notified,
-                            in case more data comes in during the notification pause.
+                            data sends an immediate notification. If a number of datagrams are
+                            received in a short time, this can result in the proxy "spamming" the
+                            plugin/device. Setting the frequency higher prevents this, but then
+                            requires the plugin/device to scan for further data for an equal period
+                            of time. That is, if the pace is 2 seconds, the plugin should loop
+                            attempting to read data for 2 seconds (at least) when notified, in case
+                            more data comes in during the notification pause.
 
 When a host first connects to the proxy, the initial greeting is sent. This greeting is always
 `OK TOGGLEDBITS-SOCKPROXY n pid`, where _n_ is the integer version number of the proxy. If your
@@ -99,15 +100,15 @@ Here's a typical method for connecting directly to a remote host in the usual wa
 
 ```
 function connect( ip, port )
-	local socket = require "socket"
-	local sock = socket.tcp()
-	sock:settimeout( 10 )
-	-- Connect directly to target
-	if sock:connect( ip, port ) then
-		return true, sock
-	end
-	sock:close()
-	return nil -- failed to connect
+    local socket = require "socket"
+    local sock = socket.tcp()
+    sock:settimeout( 10 )
+    -- Connect directly to target
+    if sock:connect( ip, port ) then
+        return true, sock
+    end
+    sock:close()
+    return nil -- failed to connect
 end
 ```
 
@@ -115,39 +116,43 @@ Here's the same function, modified to try the proxy connection first. The proxy 
 
 ```
 function connect( ip, port )
-	local socket = require "socket"
-	local sock = socket.tcp()
-	sock:settimeout( 10 )
-	-- Try proxy connection first
-	if sock:connect( "127.0.0.1", 2504 ) then
-		-- Accepted connection, connect proxy to target and go into echo mode
-		sock:send( string.format( "CONN %s:%s\n", ip, port ) )
-		local ans = sock:receive( "*l" )
-		if ans:match( "^OK CONN" ) then
-			-- Socket connected to proxy, and proxy is connected to remote in echo mode
-			return true, sock
-		end
-		-- Unhappy handshake; close and get new socket for direct connection
-		sock:shutdown("both")
-		sock:close()
-		sock = socket.tcp()
-	end
-	-- Connect directly to target
-	if sock:connect( ip, port ) then
-		return true, sock
-	end
-	sock:close()
-	return nil -- failed to connect
+    local socket = require "socket"
+    local sock = socket.tcp()
+    sock:settimeout( 10 )
+    -- Try proxy connection first
+    if sock:connect( "127.0.0.1", 2504 ) then
+        -- Accepted connection, connect proxy to target and go into echo mode
+        sock:send( string.format( "CONN %s:%s\n", ip, port ) )
+        local ans = sock:receive( "*l" )
+        if ans:match( "^OK CONN" ) then
+            -- Socket connected to proxy, and proxy is connected to remote in echo mode
+            return true, sock
+        end
+        -- Unhappy handshake; close and get new socket for direct connection
+        sock:shutdown("both")
+        sock:close()
+        sock = socket.tcp()
+    end
+    -- Connect directly to target
+    if sock:connect( ip, port ) then
+        return true, sock
+    end
+    sock:close()
+    return nil -- failed to connect
 end
 ```
 
 The above `CONN` command is abbreviated for clarity; it would normally include at least a `NTFY` option to specify the device and action (with service ID) to receive notifications of ready data.
 
-To receive notifications, you just need to define an action in the service your plugin/device default. That's the service ID and action name you provide to the NTFY command or CONN option. Because of the single-threaded nature of Vera and openLuup plugins, it's recommended that you define the implementation of your action as a `<job>` (as opposed to a `<run>`.
+To receive notifications, you just need to define an action in the service your plugin/device default. That's the service ID and action name you provide to the NTFY command or CONN option. Because of the single-threaded nature of Vera and openLuup plugins, it's recommended that you define the implementation of your action as a `<job>` (as opposed to a `<run>`. Your action implementation should read the socket to retrieve its data and handle it. 
 
-You action implementation should read the socket to retrieve its data and handle it. As mentioned earlier, if it's possible that your endpoint can send you frequent messages, you may want to consider using the PACE option to reduce the frequency of notifications. This basically "batches up" notifications so that individual receives within the pace period are sent as one notification. For example, in PACE=5, any number of datagrams arriving within a five-second period will cause only a single notification. This does not delay notifications--the first notification is sent when the first datagram is received from the remote. It is the follow-on datagrams within the next 5 seconds that don't get individual notifications. Therefore, your socket read routine should spend an amount of time equal to the pace time waiting for data, to make sure you've receive all of the datagrams that have arrived during the "quiet period."
+As mentioned earlier, if it's possible that your endpoint can send you (very) frequent messages, you may want to consider using the PACE option to reduce the frequency of notifications. This basically "batches up" notifications so that individual datagrams received within the pace period produce just one notification. For example, if PACE=5, any number of datagrams arriving within a five-second period will cause only a single notification. This does not delay notifications--the first notification is sent when the first datagram is received from the remote. It is the follow-on datagrams over the remainder of the five second period that don't get individual notifications. Therefore, your socket read routine should spend an amount of time equal to the pace time waiting for data, to make sure you've received all of the datagrams that arrive during the "quiet period."
 
-A little more about the "pid". The action will be invoked and pass the _pid_ in the "Pid" parameter. While its likely that most plugins/devices will only have a single connection to/through the proxy, any that have multiple may find it optimal to distinguish which connection is sending a notification. Examining the "Pid" parameter on the action will reveal this. The value of the parameter is, by default, the proxy connection ID that is first seen in the greeting when connecting to the proxy. If you want to keep track of _pids_, yuu can parse the greeting. The _pid_ is repeated in the acknowlegement to the CONN command (e.g. `OK CONN pid`), so you can also parse it there. Alternately, if you include a _pid_ at the end of your CONN command's NTFY option (e.g. `CONN host:port NTFY=device/serviceID/action/pid`), the _pid_ you give there is the Pid value you will receive in notifications, no parsing of proxy responses necessary. It's your choice which you want to use. Or, you can be (perhaps justifiably) lazy and not worry about it, just check all your sockets when you get a notification for any of them, and leave it at that.
+### Multiple Connections and the "Pid"
+
+It is possible to have multiple connections from a single plugin/device to/though the proxy if, for example, your plugin/device contacts multiple endpoints. In fact, that's no problem at all. Each connection can even have its own notification action, although in practical terms, this may be more cumbersome than just using a single action to receive all notifications from the proxy. How, in that case, would one distinguish which connection a notification was then for?
+
+The notification action is invoked with a "Pid" parameter, and the value of that parameter is the _pid_ first seen on the proxy's greeting. If you want to keep track of _pids_, you could parse them from the greeting on each connection. The _pid_ is also repeated in the acknowlegement to the CONN command (e.g. `OK CONN pid`), so you can also parse it there. Alternately, if you include a _pid_ at the end of your CONN command's NTFY option (e.g. `CONN host:port NTFY=device/serviceID/action/pid`), the _pid_ you give there is the Pid value you will receive in notifications &mdash; if you set one, it's used in preference to the default one, so no parsing of proxy responses is necessary. It's your choice which method you want to use. Or, you can be (perhaps justifiably) lazy and not worry about it, just check all your sockets when you get a notification for any of them, and leave it at that.
 
 ## LICENSE
 
