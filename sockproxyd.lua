@@ -100,9 +100,11 @@ logFile = io.stderr
 
 if not unpack then unpack = table.unpack end
 
+timenow = socket.gettime()
+
 print = function(...)
 	logFile:write( os.date("%x.%X") )
-	logFile:write( string.format(".%03d ", math.floor( ( socket.gettime() % 1 ) * 1000 ) ) )
+	logFile:write( string.format(".%03d ", math.floor( ( timenow() % 1 ) * 1000 ) ) )
 	logFile:write( table.concat( arg, " " ) )
 	logFile:write( "\n" )
 end
@@ -159,11 +161,12 @@ function L(msg, ...) -- luacheck: ignore 212
 	)
 	logFile:write( string.format("%02d ", level % 100 ) )
 	logFile:write( os.date("%x.%X") )
-	logFile:write( string.format(".%03d ", math.floor( ( socket.gettime() % 1 ) * 1000 ) ) )
+	logFile:write( string.format(".%03d ", math.floor( ( timenow() % 1 ) * 1000 ) ) )
 	logFile:write( str )
 	logFile:write( "\n" )
 --[[ ???dev if level <= 2 then local f = io.open( "/etc/cmh-ludl/Reactor.log", "a" ) if f then f:write( str .. "\n" ) f:close() end end --]]
 	if level <= 1 then if debug and debug.traceback then print( debug.traceback() ) end if level <= 0 then error(str, 2) end end
+	logFile:flush()
 end
 
 function D(msg, ...)
@@ -203,15 +206,15 @@ end
 
 function HTTPRequest( url )
 	local http = require "socket.http"
-	-- local ltn12 = require "ltn12"
+	local ltn12 = require "ltn12"
 
 	-- Set up the request table
 	local req = {
 		url = url,
 		source = nil,
-		sink = nil, -- discard data
+		sink = ltn12.sink.null(), -- discard data
 		method = "GET",
-		headers = { ['connection']="close", ['user-agent']="sockproxyd ".._VERSION },
+		headers = { ['connection']="close", ['user-agent']="sockproxyd-".._VERSION },
 		redirect = false
 	}
 
@@ -241,11 +244,11 @@ function handleSendQueue()
 		-- to recognize that the connection has closed (when it tries to receive()).
 		if not client or
 			(client.notifypace or 0) == 0 or
-			( (client.lastnotify or 0) + client.notifypace ) <= socket.gettime() then
+			( (client.lastnotify or 0) + client.notifypace ) <= timenow() then
 			local e = table.remove( sendQueue, k )
 			sendQueue[e.client] = nil
 			if e then
-				if client then client.lastnotify = socket.gettime() end
+				if client then client.lastnotify = timenow() end
 				HTTPRequest( e.request )
 			end
 			return
@@ -321,7 +324,7 @@ function handleClientData( client, data )
 			if st then
 				client.remote = remote
 				client.remotehost = rip .. ":" .. rport
-				client.lastremote = socket.gettime()
+				client.lastremote = timenow()
 				client.sock:send("OK CONN "..client.pid.."\n") -- add pid for confirmation
 				client.state = 2
 				client.peertimeout = client.remotetimeout
@@ -450,7 +453,7 @@ end
 function handleClient( id )
 	D("handleClient(%1)", id)
 	local client = clients[id]
-	client.lastpeer = socket.gettime()
+	client.lastpeer = timenow()
 	while coroutine.yield( client ) do
 		local sock = client.sock
 		sock:settimeout(0)
@@ -464,11 +467,11 @@ function handleClient( id )
 			data = rest or ""
 			if #data > 0 then
 				D("handleClient() receive %1 [timeout] %2 bytes", id, #data)
-				client.lastpeer = socket.gettime()
+				client.lastpeer = timenow()
 			end
 		else
 			D("handleClient() receive %1 [data] %2 bytes", id, #data)
-			client.lastpeer = socket.gettime()
+			client.lastpeer = timenow()
 		end
 		-- handle received data on client socket, if any
 		if #data > 0 then
@@ -482,7 +485,7 @@ function handleClient( id )
 			if data and #data > 0 then
 				D("remote receive %1 bytes", #data)
 				client.remote_received = ( client.remote_received or 0 ) + #data
-				client.lastremote = socket.gettime()
+				client.lastremote = timenow()
 				sock:send( data )
 				notifyClient( client )
 			elseif derr == "timeout" then
@@ -490,7 +493,7 @@ function handleClient( id )
 				if #data > 0 then
 					D("remote receive %1 bytes (partial)", #data)
 					client.remote_received = ( client.remote_received or 0 ) + #data
-					client.lastremote = socket.gettime()
+					client.lastremote = timenow()
 					sock:send( data )
 					notifyClient( client )
 				end
@@ -506,8 +509,9 @@ function handleClient( id )
 	return false
 end
 
+-- NB: Vera has 32-bit integers
 function nextid()
-	local id = math.floor( socket.gettime() * 1000 )
+	local id = math.floor( ( timenow() - 1577854800 ) / 10 )
 	if id <= lastid then id = lastid + 1 end
 	lastid = id
 	return id
@@ -568,7 +572,7 @@ function main( arg )
 				L("New connection from %1 id %2", c:getpeername(), p)
 				c:send(string.format("OK %s %s %s\n", _IDENT, _VERSION, p))
 				local co = coroutine.create( handleClient )
-				clients[p] = { id=p, pid=p, peer=c:getpeername(), sock=c, task=co, state=1, peertimeout=30000 }
+				clients[p] = { id=p, pid=p, peer=c:getpeername(), sock=c, task=co, state=1, peertimeout=30000, when=timenow() }
 				coroutine.resume( co, p ) -- start client
 			end
 		end
@@ -580,13 +584,13 @@ function main( arg )
 			local needService = ready[cl.sock] or ( cl.remote and ready[cl.remote] )
 			needService = needService or ( cl.task and coroutine.status( cl.task ) ~= "suspended" )
 			if not needService and
-				( ( cl.peertimeout or 0 ) > 0 and ( 1000 * ( socket.gettime() - cl.lastpeer ) ) >= cl.peertimeout ) then
+				( ( cl.peertimeout or 0 ) > 0 and ( 1000 * ( timenow() - cl.lastpeer ) ) >= cl.peertimeout ) then
 				needService = true
 				stopClient = true
 				L("Client %1 from %2 timed out", id, cl.peer)
 			end
 			if not needService and cl.remote and
-				( ( cl.remotetimeout or 0 ) > 0 and ( 1000 * ( socket.gettime() - cl.lastremote ) ) >= cl.remotetimeout ) then
+				( ( cl.remotetimeout or 0 ) > 0 and ( 1000 * ( timenow() - cl.lastremote ) ) >= cl.remotetimeout ) then
 				needService = true
 				stopClient = true
 				D("main() client %1 remote timeout", id)
@@ -613,7 +617,9 @@ function main( arg )
 		for _,id in ipairs( dels ) do clients[id] = nil end
 
 		-- Send something, maybe
-		handleSendQueue()
+		if not next( ready ) then
+			handleSendQueue()
+		end
 	end
 
 	L{level=2, msg="Main loop exit; closing clients"}
@@ -633,4 +639,8 @@ function main( arg )
 	return 0
 end
 
-return main( arg )
+local st,err = pcall( main, arg )
+if not st then L({level=1,msg="Exiting with status 127: %1"), err} return 127 end
+L("Exiting; status %1", err)
+if logFile ~= io.stderr then logFile:close() end
+return err

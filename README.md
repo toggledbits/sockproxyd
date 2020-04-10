@@ -9,18 +9,29 @@ The proxy is meant to run as a background task on the system, started before Lua
 When first connecting to the proxy, it is in "setup mode". In this mode, a small set of
 commands can be sent (all commands must be terminated with newline):
 
-    RTIM ms                 Receive timeout in milliseconds. If data is not received from the
+    CONN host:port [options]    Connects (TCP) to host:port, and enters "echo mode". This should
+                                always be the last setup command issued; it is not possible to issue
+                                other setup commands after connecting to the remote host.
+    STAT                        Shows the status of all connections the proxy is managing.
+    CAPA                        Shows the capabilities of this version of the proxy (also machine-readable)
+    QUIT                        Disconnect the current connection from the proxy.
+    STOP                        Close all connections and stop the proxy daemon.
+    HELP                        Print command help.
+
+The CONN command is really the main command for the proxy, and is likely the only command you will issue from your device/plugin. Options for the CONN command are structured as space-separated `key=value` pairs and may be given in any order (after the host:port, which must always come first). The following options are currently defined:
+
+    RTIM=ms                 Receive timeout in milliseconds. If data is not received from the
                             remote for longer than this period, the remote is disconnected. The
                             default is 0, meaning no timeout is enforced.
-    BLKS nbytes             Set the network block size to nbytes. The default is 2048. Messages
+    BLKS=nbytes             Set the network block size to nbytes. The default is 2048. Messages
                             larger than the network block size are received nbytes chunks. It is
                             usually not necessary to change this.
-    NTFY dev sid act [pid]  Set the device, serviceID, and action to be used for notification
+    NTFY=dev/sid/act[/pid]  Set the device, serviceID, and action to be used for notification
                             of waiting receive data. If not used, no notification is invoked.
                             The optional "pid" (string) can be used as an identifier for each conn-
                             ection if a client device has multiple connections through the proxy
                             (i.e. it tells you which connection has available data).
-    PACE seconds            Limits the pace with which received-data notifications are sent
+    PACE=seconds            Limits the pace with which received-data notifications are sent
                             to not more than once every "seconds" seconds. Default: 0, waiting
                             received sends an immediate notification. If a number of datagrams
                             are received in a short time, this can result in the proxy "spamming"
@@ -29,36 +40,19 @@ commands can be sent (all commands must be terminated with newline):
                             period of time. That is, if the pace is 2 seconds, the plugin should
                             loop attempting to read data for 2 seconds (at least) when notified,
                             in case more data comes in during the notification pause.
-    CONN host:port options  Connects (TCP) to host:port, and enters "echo mode". This should
-                            always be the last setup command issued; it is not possible to issue
-                            other setup commands after connecting to the remote host. The options
-                            can be any of RTIM, PACE, BLKS, or NTFY written as key value pairs,
-                            for example: 
-                            
-                            CONN 192.168.0.2:25 BLKS=514 PACE=1 NTFY=659/urn:toggledbits-com:serviceId:Example1/HandleReceive/0
-                            
-                            This accomplishes multiple commands on a single line and makes it easier
-                            to adapt the proxy to existing applications.
 
 When a host first connects to the proxy, the initial greeting is sent. This greeting is always
 `OK TOGGLEDBITS-SOCKPROXY n pid`, where _n_ is the integer version number of the proxy. If your
 plugin can work with different versions of the proxy, you can parse out the version number. The
-host can then issue any necessary setup commands, and end with the CONN command to connect the
-remote host and enter echo mode. The _pid_ in the greeting is the connection identfier, which by default will be 
-passed as the "Pid" parameter on action requests/notifications (unless changed by NTFY).
+_pid_ is the connection identifier for the proxy session. 
 
-Once in echo mode, the proxy passes data between the client connection (between the Vera device
-and the proxy) and the remote connection (between the proxy and the other endpoint). This continues until either end closes the connection or an error occurs. Closure of connections is always symmetrical: if the remote closes, the client closes; if the client closes, the remote
-closes. This assures that a client is not communicating to nothing, and that the proxy behaves
-as much like a direct connection as possible. This means that the proxy should be transparent
-to WSAPI, etc. Any shutdown of the connection causes a final notification, so that the Luup device/plugin can detect the closure immediately.
+Let's say, for example, that we've defined a `HandleReceive` action in the `urn:example-com:serviceId:Example1` service defined by our plugin, and our plugin is device #123. To connect to a remote endpoint at 192.168.0.155 port 3232, and have that action invoked every time receive data is available on the socket from the remote, we would issue the following CONN command:
 
-The proxy's setup mode includes a couple of commands to help humans that connect to it:
-    STAT    Shows the status of all connections the proxy is managing.
-    CAPA    Shows the capabilities of this version of the proxy (also machine-readable)
-    QUIT    Disconnect the current connection from the proxy.
-    STOP    Close all connections and stop the proxy daemon.
-    HELP    Print command help.
+    CONN 192.168.0.155:3232 NTFY=123/urn:example-com:serviceId:Example1/HandleReceive
+
+The proxy will reply with `OK CONN <connectionid>`, and from that point, the proxy is in echo (pass-thru) mode bidirectionally--all data sent by the plugin to the proxy socket is sent to the remote unmodified; all data received from the remote causes the `HandleReceive` action to be invoked, so that the plugin/device can read the data from the proxy socket. This continues until either the plugin or the remote terminates the connection, at which point there is a final notification after the connection is closed (a `receive()` call on the socket will return `nil,"closed"` as usual for LuaSocket).
+
+The commands other than CONN are really intended for humans. The STAT command, in particular, is helpful for figuring out what is connected to the proxy and what it is talking to. The STOP command will shut the proxy down (e.g. on the command line `echo STOP | nc localhost 2504` or similar will stop the proxy).
 
 Here's a typical "human" session with the proxy:
 
@@ -77,9 +71,11 @@ OK QUIT
 
 The above shows three connections. The first line shows a connection from a Vera host to an email server on port 25. The second line with the "*" to the left of its ID is the current connection (on which the STAT command was run). The third line is a connection from a Vera host to an HTD gateway on port 10006. Notice the two Vera connections have different device/service/actions for notification.
 
-## Starting sockproxyd
+## Starting sockproxyd (openLuup)
 
-The daemon is meant to be started at system startup (e.g. from `/etc/init.d` on legacy Veras).
+Vera users: the best way to install the proxy is to simply install the SockProxy plugin. This section is not for you.
+
+The daemon is meant to be started at system startup, and before openLuup is started.
 
 The following command line options are supported:
 
@@ -89,7 +85,9 @@ The following command line options are supported:
     -N _url_        The base URL for reaching the Luup system (default: http://127.0.0.1:3480)
     -D              Enable debug logging (default: debug off)
 
-## Adapting Plugins/Applications
+A template `init.d` script called `init-script.sh` is included in the distribution. It can be copied to `/etc/init.d/sockproxyd`, and should then be symlinked to `/etc/rc.d/S80sockproxyd` or similar. There are various ways for doing this, all slightly different per OS, so if you're an openLuup user setting this up, your Linux administration skills are being called upon.
+
+## For Developers: Adapting Plugins/Applications
 
 Here's a typical method for connecting directly to a remote host in the usual way:
 
@@ -97,7 +95,7 @@ Here's a typical method for connecting directly to a remote host in the usual wa
 function connect( ip, port )
 	local socket = require "socket"
 	local sock = socket.tcp()
-	sock:settimeout( 5 )
+	sock:settimeout( 10 )
 	-- Connect directly to target
 	if sock:connect( ip, port ) then
 		return true, sock
@@ -113,11 +111,10 @@ Here's the same function, modified to try the proxy connection first. The proxy 
 function connect( ip, port )
 	local socket = require "socket"
 	local sock = socket.tcp()
-	sock:settimeout( 5 )
+	sock:settimeout( 10 )
 	-- Try proxy connection
 	if sock:connect( "127.0.0.1", 2504 ) then
 		-- Accepted connection, connect proxy to target and go into echo mode
-		sock:settimeout( 2 )
 		sock:send( string.format( "CONN %s:%s\n", ip, port ) )
 		local ans = sock:receive( "*l" )
 		if ans:match( "^OK CONN" ) then
@@ -139,6 +136,10 @@ end
 ```
 
 The above `CONN` command is abbreviated for clarity; it would normally include at least a `NTFY` option to specify the device and action (with service ID) to receive notifications of ready data.
+
+To receive notifications, you just need to define an action in the service your plugin/device default. That's the service ID and action name you provide to the NTFY command or CONN option. Because of the single-threaded nature of Vera and openLuup plugins, it's recommended that you define the implementation of your action as a `<job>` (as opposed to a `<run>`.
+
+You action implementation should read the socket to retrieve its data and handle it. As mentioned earlier, if it's possible that your endpoint can send you frequent messages, you may want to consider using the PACE option to reduce the frequency of notifications. This basically "batches up" notifications so that individual receives within the pace period are sent as one notification. For example, in PACE=5, any number of datagrams arriving within a five-second period will cause only a single notification. This does not delay notifications--the first notification is sent when the first datagram is received from the remote. It is the follow-on datagrams within the next 5 seconds that don't get individual notifications. Therefore, your socket read routine should spend an amount of time equal to the pace time waiting for data, to make sure you've receive all of the datagrams that have arrived during the "quiet period."
 
 ## LICENSE
 
