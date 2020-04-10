@@ -1,0 +1,16 @@
+<?xml version="1.0"?>
+<!-- S_SockProxy1.xml -->
+<scpd xmlns="urn:schemas-upnp-org:service-1-0">
+	<specVersion>
+		<major>1</major>
+		<minor>0</minor>
+	</specVersion>
+	<serviceStateTable>
+		<stateVariable sendEvents="yes">
+			<name>Message</name>
+			<dataType>string</dataType>
+			<shortCode>message</shortCode>
+		</stateVariable>
+	</serviceStateTable>
+	<actionList/>
+</scpd>

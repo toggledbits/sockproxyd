@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- I_SockProxy1.xml -->
+<implementation>
+	<files>L_SockProxy1.lua</files>
+	<startup>startup</startup>
+	<actionList/>
+</implementation>
