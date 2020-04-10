@@ -6,7 +6,43 @@ The proxy is meant to run as a background task on the system, started before Lua
 
 Unless changed with startup options, the proxy listens on all interfaces on port 2504 by default, and assumes that Luup requests can be issued to `http://127.0.0.1:3480`.
 
-## Using the Proxy
+## Installation
+
+### Installing on Vera
+
+To install on a Vera system:
+
+1. Download the [latest release package](https://github.com/toggledbits/sockproxyd/releases) from Github;
+2. Unzip the file contents;
+2. Open *Apps > Develop apps > Luup files* in your browser;
+3. Select all of the files in the "plugin" subfolder (not the folder itself) and drag them as a group to the Upload area.
+
+Your system will reboot in about 60-90 seconds after install. This is necessary because the proxy is installed as a system background process that starts at boot.
+
+### Installing on openLuup
+
+Since each openLuup installation is different, there are no specific installation instructions. However, the following is what you need to accomplish using your ample Linux administration skills:
+
+1. Launch the `sockproxyd.lua` file as system startup, before starting openLuup;
+2. Launch it with the '-L' option to put the log file someplace sane.
+
+It's not hard.
+
+The following command line options are supported by the daemon:
+
+    -a _address_    The address on which to bind (default: *, all addresses/interfaces)
+    -p _port_       The port to listen on for proxy connections (default: 2504)
+    -L _logfile_    The log file to use (default: stderr)
+    -N _url_        The base URL for reaching the Luup system (default: http://127.0.0.1:3480)
+    -D              Enable debug logging (default: debug off)
+
+A template `init.d` script called `init-script.sh` is included in the distribution. It can be copied to `/etc/init.d/sockproxyd`, and should then be symlinked to `/etc/rc.d/S80sockproxyd` or similar. There are various ways for doing this, all slightly different per OS, so if you're an openLuup user setting this up, your Linux administration skills are being called upon.
+
+## Developer Info
+
+In this section, we'll talk about how the proxy works, and how you make use of it in existing or new plugins.
+
+### How It Works
 
 When first connecting to the proxy, it is in "setup mode". In this mode, a small set of commands can be sent (all commands must be terminated with newline):
 
@@ -78,25 +114,18 @@ OK QUIT
 
 The above shows three connections. The first line shows a connection from a Vera host to an email server on port 25. The second line with the "*" to the left of its ID is the current connection (on which the STAT command was run). The third line is a connection from a Vera host to an HTD gateway on port 10006. Notice the two Vera connections have different device/service/actions for notification.
 
-## Starting sockproxyd (openLuup)
+### Adapting Plugins/Applications
 
-Vera users: the best way to install the proxy is to simply install the SockProxy plugin. This section is not for you.
+The proxy is meant to be as transparent as possible. This should make integrating the proxy with existing code fairly straightforward. When using the proxy, there are two big differences to address:
 
-The daemon is meant to be started at system startup, and before openLuup is started.
+1. How you connect - when using the proxy, you connect to the proxy, not the endpoint, and then once you have the proxy connection, you direct the proxy to connect to the endpoint (by issing the CONN command); from there on, all device communication is the same.
+2. How you receive data - you can use the same approaches for reading data you currently use, and tune them to any degree you wish when working with the proxy. For example, if your plugin polls the socket for data periodically, it can continue to do this, it should just additionally respond to its notification action being invoked.
 
-The following command line options are supported:
+Clever developers will soon recognize that their plugins can continue to operate both with and without the proxy, with just minor code changes.
 
-    -a _address_    The address on which to bind (default: *, all addresses/interfaces)
-    -p _port_       The port to listen on for proxy connections (default: 2504)
-    -L _logfile_    The log file to use (default: stderr)
-    -N _url_        The base URL for reaching the Luup system (default: http://127.0.0.1:3480)
-    -D              Enable debug logging (default: debug off)
+> rigpapa's strategy in a nutshell: My plugin normally polls for data to receive using `luup.call_delay()` (basically). As part of my integration of the proxy, my connect function tries the proxy first, and then falls back to directly connecting to the endpoint if the proxy connection fails. I keep a boolean _usingProxy_ that tells me which I'm using: *true* for the proxy, *false* for direct connection. If _usingProxy_ is *false*, I continue to schedule my receive function as usual. But if it's *true*, I don't schedule any polling, and I have my action implementation for the proxy's notification call my receive function directly. That's pretty much the meat of it... it's that easy.
 
-A template `init.d` script called `init-script.sh` is included in the distribution. It can be copied to `/etc/init.d/sockproxyd`, and should then be symlinked to `/etc/rc.d/S80sockproxyd` or similar. There are various ways for doing this, all slightly different per OS, so if you're an openLuup user setting this up, your Linux administration skills are being called upon.
-
-## For Developers: Adapting Plugins/Applications
-
-Here's a typical method for connecting directly to a remote host in the usual way:
+Let's start by looking at the initial connection. Here's a typical method for connecting directly to a remote host in the usual way:
 
 ```
 function connect( ip, port )
@@ -143,6 +172,8 @@ end
 ```
 
 The above `CONN` command is abbreviated for clarity; it would normally include at least a `NTFY` option to specify the device and action (with service ID) to receive notifications of ready data.
+
+### Handling Notifications and Receiving Data
 
 To receive notifications, you just need to define an action in the service your plugin/device default. That's the service ID and action name you provide to the NTFY command or CONN option. Because of the single-threaded nature of Vera and openLuup plugins, it's recommended that you define the implementation of your action as a `<job>` (as opposed to a `<run>`. Your action implementation should read the socket to retrieve its data and handle it. 
 
