@@ -1,0 +1,62 @@
+{
+	"default_icon": "../signal_state/device_signal_0.png",
+	"state_icons": [{
+		"img": "../signal_state/device_signal_100.png",
+		"conditions": [{
+			"service": "urn:toggledbits-com:serviceId:SockProxy1",
+			"variable": "Status",
+			"operator": "!=",
+			"value": 0
+		}]
+	}],
+	"x": "2",
+	"y": "4",
+	"inScene": "1",
+	"Tabs": [{
+			"Label": {
+				"lang_tag": "tabname_control",
+				"text": "Control"
+			},
+			"Position": "0",
+			"TabType": "flash",
+			"ControlGroup": [{
+				"id": "1",
+				"scenegroup": "1"
+			}],
+			"SceneGroup": [{
+				"id": "1",
+				"top": "0",
+				"left": "0",
+				"x": "1",
+				"y": "1"
+			}],
+			"Control": [{
+				"ControlGroup": 1,
+				"ControlType": "variable",
+				"top": 1,
+				"left": 0,
+				"Display": {
+					"Top": 8,
+					"Left": 8,
+					"Width": 540,
+					"Height": 25,
+					"Service": "urn:toggledbits-com:serviceId:SockProxy1",
+					"Variable": "Message"
+				}
+			}]
+		},
+		{
+			"Label": {
+				"lang_tag": "ui7_advanced",
+				"text": "Advanced"
+			},
+			"Position": "1",
+			"TabType": "javascript",
+			"ScriptName": "shared.js",
+			"Function": "advanced_device"
+		}
+	],
+	"eventList2": [],
+	"device_type": "urn:schemas-toggledbits-com:device:SockProxy:1",
+	"DeviceType": "urn:schemas-toggledbits-com:device:SockProxy:1"
+}
