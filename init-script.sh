@@ -4,7 +4,7 @@ START=80
 
 USE_PROCD=1
 PROG=/etc/cmh-ludl/sockproxyd.lua
-LOGFILE=/tmp/log.sockproxyd
+LOGFILE=/tmp/sockproxyd.log
 
 start_service () {
         procd_open_instance
