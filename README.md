@@ -4,14 +4,15 @@ To solve this, the proxy notifies, via action invocation, a Luup device that dat
 
 The proxy is meant to run as a background task on the system, started before LuaUPnP (Vera) or openLuup; using an `/etc/init.d` script is the recommended method. The proxy can manage multiple connections efficiently, so one running instance of the proxy should be sufficient to serve any reasonable number of plugins. It is not necessary (and not advised) to go proxy-per-plugin.
 
+Unless changed with startup options, the proxy listens on all interfaces on port 2504 by default, and assumes that Luup requests can be issued to `http://127.0.0.1:3480`.
+
 ## Using the Proxy
 
-When first connecting to the proxy, it is in "setup mode". In this mode, a small set of
-commands can be sent (all commands must be terminated with newline):
+When first connecting to the proxy, it is in "setup mode". In this mode, a small set of commands can be sent (all commands must be terminated with newline):
 
-    CONN host:port [options]    Connects (TCP) to host:port, and enters "echo mode". This should
-                                always be the last setup command issued; it is not possible to issue
-                                other setup commands after connecting to the remote host.
+    CONN host:port [options]    Opens a (TCP) connection to the remote endpoint at host:port, and 
+                                enters "echo mode". Once in echo mode, further commands cannot be
+                                sent &mdash; the proxy is not a bidirectional conduit to the remote.
     STAT                        Shows the status of all connections the proxy is managing.
     CAPA                        Shows the capabilities of this version of the proxy (also machine-readable)
     QUIT                        Disconnect the current connection from the proxy.
@@ -44,7 +45,12 @@ The CONN command is really the main command for the proxy, and is likely the onl
 When a host first connects to the proxy, the initial greeting is sent. This greeting is always
 `OK TOGGLEDBITS-SOCKPROXY n pid`, where _n_ is the integer version number of the proxy. If your
 plugin can work with different versions of the proxy, you can parse out the version number. The
-_pid_ is the connection identifier for the proxy session. 
+_pid_ is the connection identifier for the proxy session. If your plugin/device will be making several
+connections through the proxy, you can parse the _pid_ from the greeting, or supply a different _pid_
+to the CONN command's NTFY option, so that you can distinguish notifications for one endpoint from
+the others.
+
+All commands send to the proxy must end in a single *newline* (ASCII 10) character (carriage return, ASCII 13, is not accepted or allowed). The greeting and all replies to commands sent by the proxy will also terminate in a newline. This makes them safe and easy to read with `sock:receive("*l")`.
 
 Let's say, for example, that we've defined a `HandleReceive` action in the `urn:example-com:serviceId:Example1` service defined by our plugin, and our plugin is device #123. To connect to a remote endpoint at 192.168.0.155 port 3232, and have that action invoked every time receive data is available on the socket from the remote, we would issue the following CONN command:
 
@@ -112,7 +118,7 @@ function connect( ip, port )
 	local socket = require "socket"
 	local sock = socket.tcp()
 	sock:settimeout( 10 )
-	-- Try proxy connection
+	-- Try proxy connection first
 	if sock:connect( "127.0.0.1", 2504 ) then
 		-- Accepted connection, connect proxy to target and go into echo mode
 		sock:send( string.format( "CONN %s:%s\n", ip, port ) )
