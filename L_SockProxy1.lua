@@ -3,8 +3,6 @@
 local PLUGIN_NAME =		"SockProxy1"
 local PLUGIN_VERSION =	"20101.1135"
 
-
-
 local isOpenLuup = luup.openLuup ~= nil
 local pluginDevice
 
@@ -102,28 +100,18 @@ function startup( pdev )
 
 	local selfd = lfs.attributes( ipath.."L_SockProxy1.lua.lzo", "modification" )
 
-	local pkg = ipath.."L_SockProxy1_pkg.lua.lzo"
-	local script = ipath .. "sockproxyd.lua"
-	if file_mod( pkg ) >= file_mod( script ) then
-		luup.log("SockProxy1: refreshing proxy daemon executable",2)
-		if os.execute( "pluto-lzo d '" .. pkg .. "' '" .. script .. "'" ) == 0 then
-			restart = true
-		else
-			luup.log("SockProxy1: An error occurred while attempting to uncompress the daemon executable. Please do it manually. The daemon has not been updated.",1)
-			return false, "Setup failure 1", PLUGIN_NAME
-		end
-	end
-
+	-- Check the init script
 	local inits = "/etc/init.d/sockproxyd"
 	local initd = file_mod( inits )
 	if selfd >= initd then
+		if initd > 0 then os.execute( "/etc/init.d/sockproxyd stop" ) end
 		luup.log("SockProxy1: Writing init script "..inits)
 		local f,err = io.open( inits, "w" )
 		if not f then
 			luup.log("SockProxy1:startup() can't write "..inits..": "..tostring(err),1)
 			return false, "Setup failure 2", PLUGIN_NAME
 		end
-		f:write(([[#!/bin/sh /etc/rc.common
+		f:write((([[#!/bin/sh /etc/rc.common
 # (C) 2020 Patrick H. Rigney, All Rights Reserved; part of SockProxy
 # init script for Vera systems
 # https://github.com/toggledbits/sockproxyd
@@ -135,13 +123,15 @@ PROG=###sockproxyd.lua
 LOGFILE=/tmp/sockproxyd.log
 
 start_service () {
-        procd_open_instance
-        procd_set_param command lua "$PROG" -L "$LOGFILE"
-        procd_set_param pidfile /var/run/sockproxyd.pid
-        procd_set_param limits core="unlimited"
-        procd_close_instance
+    procd_open_instance
+    procd_set_param command lua "$PROG" -L "$LOGFILE"
+    procd_set_param pidfile /var/run/sockproxyd.pid
+    procd_set_param limits core="unlimited"
+    procd_set_param respawn 3600 90 10
+    procd_close_instance
 }
-]]):gsub( "%#%#%#", ipath ) )
+]]):gsub( "%#%#%#", ipath )) )
+		f:write("\n# written "..os.date("%x.%X").."\n")
 		f:close()
 		os.execute( "rm -f /etc/rc.d/S*sockproxyd" )
 	end
@@ -155,6 +145,22 @@ start_service () {
 			return false, "Setup failure 3", PLUGIN_NAME
 		end
 	end
+
+	-- Check the proxy daemon executable itself
+	local pkg = ipath.."sockproxyd.lua.lzo"
+	if file_mod( pkg ) == 0 then return false, "Invalid install (2)", PLUGIN_NAME end
+	local script = ipath .. "sockproxyd.lua"
+	if file_mod( pkg ) >= file_mod( script ) then
+		luup.log("SockProxy1: refreshing proxy daemon executable", 2)
+		if os.execute( "pluto-lzo d '" .. pkg .. "' '" .. script .. "'" ) == 0 then
+			os.execute( "/etc/init.d/sockproxyd stop" )
+			restart = true
+		else
+			luup.log("SockProxy1: An error occurred while attempting to uncompress the daemon executable. Please do it manually. The daemon has not been updated.",1)
+			return false, "Setup failure 1", PLUGIN_NAME
+		end
+	end
+
 	if restart then
 		setVar( "Message", "Waiting for system reboot to complete install" )
 		luup.call_delay( "reboot", 60, "" )
@@ -162,7 +168,7 @@ start_service () {
 		return false, "Reboot! Please Wait!", PLUGIN_NAME
 	end
 	luup.log("SockProxy1: system configuration checks out OK. First proxy health check will occur shortly.")
-	luup.call_delay( 'proxy_check', 5 )
+	luup.call_delay( 'proxy_check', 15 )
 	luup.set_failure( 0, pdev )
 	return true, "", PLUGIN_NAME
 end
