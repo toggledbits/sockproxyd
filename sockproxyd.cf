@@ -1,0 +1,31 @@
+; This is the default configuration for sockproxyd (SockProxy plugin for Luup)
+; The format is basically the old Microsoft INI file format.
+
+
+; The [host] section defines the general proxy host parameters
+
+[host]
+;
+; ip - The IP address on which the proxy will listen for connections. *=all interfaces
+;ip=*
+;
+; port - the port on which connections are accepted into command mode (default 2504)
+;port=2504
+;
+; debug -- if present, debug mode is enabled (more output). It takes no parameters.
+;debug
+;
+; log -- log file; default is "-", stderr.
+;log=/tmp/sockproxyd.log
+
+
+
+; The [direct] section allows you to define additional listeners that will connect directly
+; to the specified host:port when a connection is received on a listening port. Direct listeners
+; go directly into echo mode (hence the name) upon connection; command mode is bypassed. All
+; CONN options are available after the host:port.
+
+[direct]
+;
+; Example: port 8123 will connect directly to 192.168.0.15 port 25 in echo mode (no command mode)
+;8123=192.168.0.15:25 NTFY=55/urn:example-com:serviceId:Example1/HandleReceive

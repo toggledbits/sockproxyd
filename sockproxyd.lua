@@ -13,7 +13,7 @@ socket = require "socket"
 
 _PLUGIN_NAME = "sockproxyd"
 _VERSION = 1 -- version of the protocol, which is what we declare to clients
-_BUILD = 20101
+_BUILD = 20106
 
 DEFAULT_BLOCKSIZE = 2048
 DEFAULT_PORT = 2504
@@ -21,11 +21,14 @@ DEFAULT_SERVICE = "urn:toggledbits-com:serviceId:SockProxy1"
 DEFAULT_ACTION = "HandleReceiveData"
 _IDENT = "TOGGLEDBITS-SOCKPROXY" -- Do NOT modify this string, ever.
 
-ip = "*"
-port = DEFAULT_PORT
-vera = "http://127.0.0.1:3480"
+settings = {
+	host={ ip="*", port=DEFAULT_PORT, vera="http://127.0.0.1:3480" },
+	direct={}
+}
+
 lastid = 0
 clients = {}
+listeners = {}
 sendQueue = {}
 debugMode = false
 keepGoing = true
@@ -40,6 +43,7 @@ print = function(...)
 	logFile:write( string.format(".%03d ", math.floor( ( timenow() % 1 ) * 1000 ) ) )
 	logFile:write( table.concat( arg, " " ) )
 	logFile:write( "\n" )
+	logFile:flush()
 end
 
 function dump(t, seen)
@@ -97,9 +101,9 @@ function L(msg, ...) -- luacheck: ignore 212
 	logFile:write( string.format(".%03d ", math.floor( ( timenow() % 1 ) * 1000 ) ) )
 	logFile:write( str )
 	logFile:write( "\n" )
+	logFile:flush()
 --[[ ???dev if level <= 2 then local f = io.open( "/etc/cmh-ludl/Reactor.log", "a" ) if f then f:write( str .. "\n" ) f:close() end end --]]
 	if level <= 1 then if debug and debug.traceback then print( debug.traceback() ) end if level <= 0 then error(str, 2) end end
-	logFile:flush()
 end
 
 function D(msg, ...)
@@ -135,6 +139,38 @@ function urlencode( s )
 	return string.gsub( tostring( s or ""), "[^A-Za-z0-9_.~-]", function( c )
 		return string.format( "%%%02x", string.byte( c ) )
 	end )
+end
+
+function readConfig( fn, cf )
+	cf = cf or {}
+	local f,ferr = io.open( fn, "r" )
+	if not f then
+		return nil, ferr
+	end
+	local section = cf
+	while true do
+		local line = f:read("*l")
+		if not line then break end
+		line = line:gsub( "^%s+", "" ):gsub( "%s+$", "" )
+		if line:match( "%S" ) and not line:match("^;") then
+			local s = line:match( "^%[([^%]]+)%]" )
+			if s then
+				s = s:lower()
+				cf[s] = cf[s] or {}
+				section = cf[s]
+			else
+				local val
+				s,val = line:match( "^([^=]+)=(.*)" )
+				if s then
+					section[s:lower()] = val
+				else
+					section[line:lower()] = true
+				end
+			end
+		end
+	end
+	f:close()
+	return cf
 end
 
 function HTTPRequest( url )
@@ -198,7 +234,7 @@ function notifyClient( client )
 	end
 	local req = string.format(
 		[[%s/data_request?id=action&output_format=json&DeviceNum=%s&serviceId=%s&action=%s&Pid=%s]],
-		vera,
+		settings.host.vera,
 		client.device or -1,
 		urlencode( client.service or DEFAULT_SERVICE ),
 		urlencode( client.action or DEFAULT_ACTION ),
@@ -207,66 +243,86 @@ function notifyClient( client )
 	sendQueue[ client.id ] = #sendQueue
 end
 
+local function dtime( n )
+	n = math.floor( n )
+	local t = "m"
+	if n >= 6000 then
+		n = math.floor( n / 60 )
+		t = "h"
+	end
+	local s = n % 60
+	local m = math.floor(n / 60)
+	return string.format("%02d%s%02d", m, t, s)
+end
+
+function processCONN( client, cmd )
+	local rip, rport, rest = cmd:match("^([^:]+):(%d+)%s*(.*)")
+	rest = rest or ""
+	if not rip then
+		client.sock:send("ERR CONN Invalid host:port\n")
+		return false
+	end
+	rport = tonumber( rport ) or 80
+	-- Handle options
+	local opts = split( rest:gsub("^ +","") , " " )
+	for _,opt in ipairs( opts ) do
+		local k,v = opt:match( "^([^=]+)=(.*)" )
+		if k == "RTIM" then
+			client.remotetimeout = tonumber(v) or client.remotetimeout
+		elseif k == "BLKS" then
+			client.block = tonumber(v) or client.block
+		elseif k == "PACE" then
+			client.notifypace = tonumber(v) or client.notifypace
+		elseif k == "NTFY" then
+			local args = split( v, "/" )
+			client.device = tonumber( args[1] ) or -1
+			client.service = args[2] or DEFAULT_SERVICE
+			client.action = args[3] or DEFAULT_ACTION
+			client.pid = args[4] or client.pid
+		else
+			L({level=2,"Client %1 attempted CONN option %1, not supported"}, client.id, opt)
+			client.sock:send("ERR CONN Invalid option "..opt.."\n")
+			return false
+		end
+	end
+	local remote = socket.tcp()
+	remote:settimeout( 5 )
+	-- remote:setoption('keepalive', true)
+	L("Client %1 from %2 attempting remote to %3:%4", client.id, client.peer, rip, rport)
+	local st, err = remote:connect( rip, rport )
+	if st then
+		client.remote = remote
+		client.remotehost = rip .. ":" .. rport
+		client.lastremote = timenow()
+		client.peertimeout = client.remotetimeout
+		D("handleClientData() client %1 now with remote %2:%3", client.id, rip, rport)
+		return true
+	end
+	client.sock:send("ERR CONN "..tostring(err).."\n")
+	L("Client %1 connection to %2:%3 failed: %4", client.id, rip, rport, err)
+	return false
+end
+
 function handleClientData( client, data )
 	D("handleClientData(%1,%2)", client, data)
 	if client.state == 1 then
-		-- Waiting for mode
+		-- Waiting for COMMAND
 		client.buffer = ( client.buffer or "" ) .. data
 		if not client.buffer:match("\n") then return true end
 		data = client.buffer
 		client.buffer = nil
 		local cmd,rest = data:match("^%s*(%S+)%s*(.*)\n")
 		rest = rest or ""
-		D("handleClient() client %1 command %2 rest %3", id, cmd, rest)
+		D("handleClient() client %1 command %2 rest %3", client.id, cmd, rest)
 		if cmd == "CONN" then
 			-- CONN host:ip
-			local rip, rport, rest = rest:match("^([^:]+):(%d+)%s*(.*)")
-			rest = rest or ""
-			if not rip then
-				client.sock:send("ERR CONN Invalid host:port\n")
-				return false
-			end
-			rport = tonumber( rport ) or 80
-			-- Handle options
-			local opts = split( rest:gsub("^ +","") , " " )
-			for _,opt in ipairs( opts ) do
-				local k,v = opt:match( "^([^=]+)=(.*)" )
-				if k == "RTIM" then
-					client.remotetimeout = tonumber(v) or client.remotetimeout
-				elseif k == "BLKS" then
-					client.block = tonumber(v) or client.block
-				elseif k == "PACE" then
-					client.notifypace = tonumber(v) or client.notifypace
-				elseif k == "NTFY" then
-					local args = split( v, "/" )
-					client.device = tonumber( args[1] ) or -1
-					client.service = args[2] or DEFAULT_SERVICE
-					client.action = args[3] or DEFAULT_ACTION
-					client.pid = args[4] or client.pid
-				else
-					L({level=2,"Client %1 attempted CONN option %1, not supported"}, id, opt)
-					client.sock:send("ERR CONN Invalid option "..opt.."\n")
-					return false
-				end
-			end
-			local remote = socket.tcp()
-			remote:settimeout(5)
-			-- remote:setoption('keepalive', true)
-			L("Client %1 from %2 attempting remote to %3:%4", client.id, client.peer, rip, rport)
-			local st, err = remote:connect( rip, rport )
+			local st = processCONN( client, rest )
 			if st then
-				client.remote = remote
-				client.remotehost = rip .. ":" .. rport
-				client.lastremote = timenow()
-				client.sock:send("OK CONN "..client.pid.."\n") -- add pid for confirmation
+				-- Enter ECHO mode
 				client.state = 2
-				client.peertimeout = client.remotetimeout
-				D("handleClientData() client %1 now with remote %2:%3", client.id, rip, rport)
-				return true
+				client.sock:send("OK CONN "..client.pid.."\n") -- add pid for confirmation
 			end
-			client.sock:send("ERR CONN "..tostring(err).."\n")
-			L("Client %1 connection to %2:%3 failed: %4", client.id, rip, rport, err)
-			return false
+			return st
 		elseif cmd == "NTFY" then
 			-- NTFY device service action pid
 			local dev,service,action,pid = unpack( split( rest, " " ) )
@@ -278,8 +334,8 @@ function handleClientData( client, data )
 			return true
 		elseif cmd == "STAT" then
 			-- STAT(US)
-			local f = "%s%-16s %-2s %-16s %-21s %6s %6s %s\n"
-			local l = string.format( f, " ", "ID", "St", "Client", "Remote", "#recv", "#xmit", "Notify" )
+			local f = "%s%-8s %-2s %-5s|%-5s %-16s %-21s %6s %6s %s\n"
+			local l = string.format( f, " ", "ID", "St", "Idle", "Uptim", "Client", "Remote", "#recv", "#xmit", "Notify" )
 			client.sock:send( l )
 			for _,cl in pairs( clients ) do
 				local nt = ( cl.device or -1 ) > 0 and
@@ -289,6 +345,8 @@ function handleClientData( client, data )
 					( client.id == cl.id ) and "*" or " ",
 					cl.id,
 					cl.state,
+					dtime( timenow()-(cl.lastremote or timenow()) ),
+					dtime( timenow()-cl.when ),
 					cl.peer or "",
 					cl.remotehost or "",
 					cl.remote_received or 0,
@@ -355,7 +413,7 @@ CONN host:port [key=value ...] - Connect to remote (enters echo mode, must be la
 			return false
 		end
 	elseif client.state == 2 then
-		-- Echo state. We receive data from client and send it to remote.
+		-- ECHO mode. We receive data from client and send it to remote.
 		client.remote:send( data )
 		client.remote_sent = (client.remote_sent or 0) + #data
 		D("handleClientData() remote -> %1", data)
@@ -369,14 +427,12 @@ function closeClient( client )
 	D("closeClient(%1)", client.id)
 	if client.remote then
 		client.remote:settimeout(0)
-		while client.remote:receive( 1 ) do end
 		client.remote:shutdown("both")
 		client.remote:close()
 		client.remote = nil
 	end
 	if client.sock then
 		client.sock:settimeout(0)
-		while client.sock:receive( 1 ) do end
 		client.sock:shutdown("both")
 		client.sock:close()
 		client.sock = nil
@@ -392,47 +448,41 @@ function handleClient( id )
 		sock:settimeout(0)
 		local data,derr,rest = sock:receive( client.block or DEFAULT_BLOCKSIZE )
 		if not data then
-			if derr ~= "timeout" then
-				D("handleClient() receive %1 %2 %3 bytes", id, derr, #rest)
+			if rest and #rest > 0 then
+				D("handleClient() peer receive partial %1 %2 bytes (%3)", id, #rest, derr)
+				data = rest
+			elseif derr ~= "timeout" then
+				L("Client %1 peer %2", id, derr)
 				break
 			end
-			-- Timeout, maybe with partial data
-			data = rest or ""
-			if #data > 0 then
-				D("handleClient() receive %1 [timeout] %2 bytes", id, #data)
-				client.lastpeer = timenow()
-			end
-		else
-			D("handleClient() receive %1 [data] %2 bytes", id, #data)
-			client.lastpeer = timenow()
 		end
 		-- handle received data on client socket, if any
-		if #data > 0 then
+		if data and #data > 0 then
+			client.lastpeer = timenow()
 			if not handleClientData( client, data ) then break end
+			if derr and derr ~= "timeout" then break end
 		end
 
 		-- see if remote has data
 		if client.remote then
 			client.remote:settimeout(0)
 			data,derr,rest = client.remote:receive( client.block or DEFAULT_BLOCKSIZE )
+			if not data then
+				if rest and #rest > 0 then
+					D("Client %1 remote receive partial %2 bytes (%3)", client.id, #rest, derr)
+					data = rest
+				elseif derr ~= "timeout" then
+					L("Client %1 remote %2", client.id, derr)
+					break
+				end
+			end
 			if data and #data > 0 then
 				D("remote receive %1 bytes", #data)
 				client.remote_received = ( client.remote_received or 0 ) + #data
 				client.lastremote = timenow()
 				sock:send( data )
+				if derr and derr ~= "timeout" then break end -- notify will still happen
 				notifyClient( client )
-			elseif derr == "timeout" then
-				data = rest or ""
-				if #data > 0 then
-					D("remote receive %1 bytes (partial)", #data)
-					client.remote_received = ( client.remote_received or 0 ) + #data
-					client.lastremote = timenow()
-					sock:send( data )
-					notifyClient( client )
-				end
-			else
-				L("Client %1 remote %2 %3", id, client.remotehost, derr)
-				break
 			end
 		end
 	end
@@ -454,45 +504,82 @@ function main( arg )
 	while #arg > 0 do
 		local aa = table.remove( arg, 1 )
 		if aa == "-a" then
-			ip = table.remove( arg, 1 ) or ip
+			settings.host.ip = table.remove( arg, 1 ) or settings.host.ip
+		elseif aa == "-c" then
+			local cf = table.remove( arg, 1 ) or "/usr/local/etc/sockproxyd.cf"
+			local st,se = readConfig( cf, settings )
+			if not st then error("Can't read config "..cf..": "..se) end
+			settings = st
 		elseif aa == "-p" then
-			port = tonumber( table.remove( arg, 1 ) ) or port
+			settings.host.port = tonumber( table.remove( arg, 1 ) ) or settings.host.port
 		elseif aa == "-D" then
-			debugMode = true
+			settings.host.debug = true
 		elseif aa == "-L" then
-			local log = table.remove( arg, 1 ) or "./sockproxyd.log"
-			local f,ferr = io.open( log, "a" )
-			if not f then error(logName..": "..ferr) end
-			logFile = f
+			settings.host.log = table.remove( arg, 1 ) or "./sockproxyd.log"
 		elseif aa == "-N" or aa == "-V" then
-			vera = table.remove( arg, 1 ) or vera
+			settings.host.vera = table.remove( arg, 1 ) or settings.host.vera
 		else
 			error("Unrecognized command line argument: "..aa)
 		end
 	end
 
+	if settings.host.log and settings.host.log ~= "-" then
+		local f,ferr = io.open( settings.host.log, "a" )
+		if not f then error(settings.host.log..": "..ferr) end
+		logFile = f
+	else
+		logFile = io.stderr
+	end
+
+	debugMode = debugMode or settings.host.debug
+
 	L("Starting sockproxyd version %1 build %2", _VERSION, _BUILD)
 
+	D("settings: %1", settings)
+
 	local server = socket.tcp()
-	assert( server:bind( ip, port ) )
+	assert( server:bind( settings.host.ip, settings.host.port ) )
 	assert( server:setoption( 'reuseaddr', true ) )
 	assert( server:listen( 5 ) )
 	assert( server:settimeout(0) )
 
-	L("Ready to serve at %1:%2", ip, port)
+	listeners = { [server]="!" }
+
+	for loc,v in pairs( settings.direct or {} ) do
+		loc = tonumber( loc )
+		if loc then
+			local s = socket.tcp()
+			local st,se = s:bind( settings.host.ip, loc )
+			if st then
+				s:setoption( 'reuseaddr', true )
+				s:listen( 5 )
+				s:settimeout( 0 )
+				listeners[s] = v
+				L("Added listener on %1:%2 for %3", settings.host.ip, loc, v)
+			else
+				L({level=0,"Can't listen on %1:%2: %3"}, settings.host.ip, loc, se)
+			end
+		end
+	end
+
+	L("Ready to serve at %1:%2", settings.host.ip, settings.host.port)
 	while keepGoing do
 		-- Wait for something to do.
-		local clist = { server }
+		-- ??? This list construction is really lazy, but good enough for now. FIXME later!!!
+		local clist = {}
+		for cl in pairs( listeners ) do
+			table.insert( clist, cl )
+		end
 		for _,cl in pairs( clients ) do
 			table.insert( clist, cl.sock )
 			if cl.remote then table.insert( clist, cl.remote ) end
 		end
-		-- D("select(%1)", clist)
-		-- ??? we can do a better job of figuring out timing here, some day. But this is fine.
+		D("select(%1)", clist)
+		-- ??? we can do a better job of figuring out timing here, some day. But this is fine for now.
 		local ready = socket.select( clist, {}, ( #sendQueue == 0 ) and 5 or 1 )
 		if debugMode and next(ready) then D("select() ready=%1", ready) end
 
-		-- Accept from new client?
+		-- Accept from new proxy client?
 		if ready[server] then
 			D("main() server socket on ready list, accepting new connection")
 			local c,cerr = server:accept()
@@ -509,6 +596,27 @@ function main( arg )
 				local co = coroutine.create( handleClient )
 				clients[p] = { id=p, pid=p, peer=c:getpeername(), sock=c, task=co, state=1, peertimeout=30000, when=timenow() }
 				coroutine.resume( co, p ) -- start client
+			end
+		end
+
+		-- Check direct listeners for new connections
+		for s,d in pairs( listeners ) do
+			if s ~= server and ready[s] then
+				local c,cerr = s:accept()
+				if not c and cerr ~= "timeout" then
+					L({level=2,"accept() error on listener %1: %2"}, d, cerr)
+				else
+					local p = string.format("L%x", nextid())
+					local co = coroutine.create( handleClient )
+					clients[p] = { id=p, pid=p, peer=c:getpeername(), sock=c, task=co, state=2, peertimeout=30000, when=timenow() }
+					if processCONN( clients[p], d ) then
+						coroutine.resume( co, p )
+					else
+						L({level=1,"Listener failed to connect to %1: %2"}, d, se)
+						closeClient( clients[p] )
+						clients[p] = nil
+					end
+				end
 			end
 		end
 
@@ -535,13 +643,18 @@ function main( arg )
 				local status,terr = coroutine.resume( cl.task, not stopClient )
 				if not ( status and coroutine.status( cl.task ) == "suspended" ) then
 					-- Stop or error exit.
+					local s = string.format("ran %s; received %d; sent %d",
+						dtime( timenow() - ( cl.when or timenow() ) ),
+						cl.remote_received or 0, cl.remote_sent or 0)
 					if not status then
-						L({level=2,msg="Client %1: %2"}, id, terr)
+						L({level=2,msg="Client %1: %2; "..s}, id, terr)
 					else
-						L("Client %1 from %2 stopped", id, cl.peer)
+						L("Client %1 from %2 stopped; "..s, id, cl.peer)
 					end
-					notifyClient( cl )
-					closeClient( cl )
+					if cl.sock or cl.remote then
+						notifyClient( cl )
+						closeClient( cl )
+					end
 					cl.task = nil -- mark coroutine gone for later deletion
 				end
 			end
@@ -551,7 +664,7 @@ function main( arg )
 		end
 		for _,id in ipairs( dels ) do clients[id] = nil end
 
-		-- Send something, maybe
+		-- Send something, maybe (process the send queue)
 		if not next( ready ) then
 			handleSendQueue()
 		end
@@ -569,8 +682,11 @@ function main( arg )
 			clients[cl.id] = nil
 		end
 	end
-	L("Closing proxy server")
-	server:close()
+	L("Closing listeners and host")
+	for s in pairs( listeners ) do
+		D("closing %1", s)
+		s:close()
+	end
 	return 0
 end
 

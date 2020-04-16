@@ -30,6 +30,7 @@ It's not hard.
 
 The following command line options are supported by the daemon:
 
+    -c configfile   Specify an optional configuration file to read for settings (see below)
     -a _address_    The address on which to bind (default: *, all addresses/interfaces)
     -p _port_       The port to listen on for proxy connections (default: 2504)
     -L _logfile_    The log file to use (default: stderr)
@@ -37,6 +38,35 @@ The following command line options are supported by the daemon:
     -D              Enable debug logging (default: debug off)
 
 A template `init.d` script called `init-script.sh` is included in the distribution. It can be copied to `/etc/init.d/sockproxyd`, and should then be symlinked to `/etc/rc.d/S80sockproxyd` or similar. There are various ways for doing this, all slightly different per OS, so if you're an openLuup user setting this up, your Linux administration skills are being called upon.
+
+## Configuration File
+
+The "-c" command line option allows an optional configuration file to read to retrieve settings. The configuration file is in a simple (Microsoft INI-style) format in which key/value pairs, separated by an equal sign ("="), appear in sections designated by a section name surrounded in square brackets (e.g. `[host]`). A line beginning with a semicolon (";") is a comment. Blank lines are ignored.
+
+The following is an example of a configuration file. In your own configuration file, you only need to specify settings where they are different from the defaults.
+
+```
+; Sample sockproxyd configuration file. Uncomment lines and change values where other than default 
+; is required. This file is in a Microsoft INI-style format. Lines like '[host]' are section
+; declarations. Lines like 'port=2504' are key=value pairs for setting configuration parameters.
+; Lines beginning with a semicolon (';') are comments. Blank lines and comments are ignored.
+
+[host]
+; ip=*
+; port=2504
+; vera=http://127.0.0.1:3480
+; log=/tmp/sockproxyd.log
+; debug
+
+[direct]
+; 8125=CONN mail.example.com:25 NTFY=55/urn:example-com:serviceId:MailProxy1/HandleReceive/0
+```
+
+The `[host]` section defines the basic host configuration of the proxy. The `ip` is the IP address on which the proxy will listen; "*" means listen on all interfaces. The `port` is the proxy listening port; connections to this port start in command mode. The `vera` key is the target URL of the Luup system for sending notifications; by default, this is the system on which the proxy is also running, and the default Luup request port is used. The `log` section allows the direction of log output to the named file; default is *stderr*. The `debug` key, if present, requires no value and turns on debug output.
+
+The `[direct]` section allows you to create listeners that connect immediately to a specific host and port without going through command mode. Any number of listeners can be specified, but each must be on its own port. Multiple direct listeners can, however, connect to the same endpoint. The "key" (left side of equal sign) of entries in this section is the port number on which to listen, and the "value" (right side of equal sign) is a CONN command to be processed when a connection occurs. The example shows a direct listener from the local port 8125 to the mail server at `mail.example.com`, with notification to device 55 on receive.
+
+The configuration file is processed in order on the command line. That is, if the command line is "-c test.cf -a 192.168.0.1", then the address of the proxy host will be 192.168.0.1, because the "-a" option appears after "-c" and therefore will override any value set by the configuration file `test.cf`. Conversely, if "-a 192.168.0.1 -c test.cf" is used on the command line, any address set by `test.cf` will override the value set by "-a". Generally speaking, you probably want "-c" to be first, to allow the remaining command line options, if any, to serve as overrides to your configuration file.
 
 ## Developer Info
 
