@@ -1,11 +1,11 @@
 {
-	"default_icon": "../signal_state/device_signal_0.png",
+	"default_icon": "../../../icons/SockProxy1.png",
 	"state_icons": [{
-		"img": "../signal_state/device_signal_100.png",
+		"img": "../signal_state/device_signal_0.png",
 		"conditions": [{
 			"service": "urn:toggledbits-com:serviceId:SockProxy1",
 			"variable": "Status",
-			"operator": "!=",
+			"operator": "==",
 			"value": 0
 		}]
 	}],
