@@ -12,5 +12,15 @@
 			<shortCode>message</shortCode>
 		</stateVariable>
 	</serviceStateTable>
-	<actionList/>
+	<actionList>
+        <action>
+            <name>HandleReceive</name>
+            <argumentList>
+                <argument>
+                    <name>Pid</name>
+                    <direction>in</direction>
+                </argument>
+            </argumentList>
+        </action>
+	</actionList>
 </scpd>
