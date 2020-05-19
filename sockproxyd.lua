@@ -13,7 +13,7 @@ socket = require "socket"
 
 _PLUGIN_NAME = "sockproxyd"
 _VERSION = 1 -- version of the protocol, which is what we declare to clients
-_BUILD = 20106
+_BUILD = 20138
 
 DEFAULT_BLOCKSIZE = 2048
 DEFAULT_PORT = 2504
@@ -298,6 +298,7 @@ function processCONN( client, cmd )
 		D("handleClientData() client %1 now with remote %2:%3", client.id, rip, rport)
 		return true
 	end
+	remote:close()
 	client.sock:send("ERR CONN "..tostring(err).."\n")
 	L("Client %1 connection to %2:%3 failed: %4", client.id, rip, rport, err)
 	return false
