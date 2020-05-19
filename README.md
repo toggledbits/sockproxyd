@@ -6,6 +6,8 @@ The proxy is meant to run as a background task on the system, started before Lua
 
 Unless changed with startup options, the proxy listens on all interfaces on port 2504 by default, and assumes that Luup requests can be issued to `http://127.0.0.1:3480`.
 
+If you are also looking for a WebSocket client module for Luup, please see my [LuWS project](https://github.com/toggledbits/LuWS).
+
 ## Installation
 
 ### Installing on Vera
