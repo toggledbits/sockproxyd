@@ -2,7 +2,7 @@
 
 local PLUGIN_NAME =		"SockProxy1"
 local PLUGIN_ID = 		9302
-local PLUGIN_VERSION =	"1.0-20140"
+local PLUGIN_VERSION =	"1.0-20225"
 
 local _CONFIGVERSION = 20140
 
@@ -88,7 +88,7 @@ end
 local function check_plugin_install( pdev )
 	local ipath = getInstallPath()
 	local restart = false
-	luup.log("SockProxy1: Checking installation for %2; install path is %1", ipath, pdev)
+	luup.log("SockProxy1: Checking installation for "..pdev.."; install path is "..ipath)
 
 	local lastversion = tonumber( ( luup.variable_get( MYSID, "ConfigVersion", pdev ) ) ) or 0
 
@@ -240,7 +240,7 @@ function startup( pdev )
 	end
 
 	setVar("Message", "Pausing for first health check...")
-	luup.log("SockProxy1: first proxy health check will occur shortly.")
+	luup.log("SockProxy1: First proxy health check will occur shortly.")
 	luup.call_delay( 'proxy_check', 15 )
 	luup.set_failure( 0, pdev )
 	return true, "", PLUGIN_NAME
