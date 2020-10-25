@@ -97,7 +97,7 @@ When first connecting to the proxy, the connection is in "setup mode". In this m
 
     CONN host:port [options]    Opens a (TCP) connection to the remote endpoint at host:port, and 
                                 enters "echo mode". Once in echo mode, further commands cannot be
-                                sent &mdash; the proxy is not a bidirectional conduit to the remote.
+                                sent -- the proxy is now a bidirectional conduit to the remote.
     STAT                        Shows the status of all connections the proxy is managing.
     CAPA                        Shows the capabilities of this version of the proxy (also machine-readable)
     QUIT                        Disconnect the current connection from the proxy.
@@ -110,8 +110,8 @@ The CONN command is really the main command for the proxy, and is likely the onl
                             remote for longer than this period, the remote is disconnected. The
                             default is 0, meaning no timeout is enforced.
     BLKS=nbytes             Set the network block size to nbytes. The default is 2048. Messages
-                            larger than the network block size are received nbytes chunks. It is
-                            usually not necessary to change this.
+                            larger than the network block size are received in nbytes chunks. It
+                            is usually not necessary to change this.
     NTFY=dev/sid/act[/pid]  Set the device, serviceID, and action to be used for notification
                             of waiting receive data. If not used, no notification action is invoked.
                             The optional "pid" (string) can be used as an identifier for each conn-
