@@ -78,6 +78,69 @@ In this section, we'll talk about how the proxy works, and how you make use of i
 
 Operation is simple. The proxy sits listening on port 2504 by default. A Luup plugin that would normally connect directly to a remote device/endpoint instead connects to the proxy, and then sends a command to the proxy tell *it* to connect to the remote. The plugin also tells the proxy what action should be invoked when data has been received from the remote. The proxy then connects to the remote, and enters "echo" mode, in which all data sent by either end is sent to the other.
 
+Step by step, the plug first connects to the SockProxy (usually by connecting to 127.0.0.1 TCP port 2504):
+
+```
+    +--------+  connect +-----------+
+    | Luup   |--------->|           |
+    | Plugin |          | SockProxy |
+    |        |<---------|           |
+    +--------+   "Hi!"  +-----------+
+```
+
+In this first step, the proxy simply sends a greeting response once connected that tells the client plugin the version number of the proxy. The proxy is then ready to receive commands to tell it what to do.
+
+When ready, the plugin can issue a `CONN` command to the proxy. The proxy will establish a connection to the named remote host. In the diagram below, let's assume that the `CONN` command has included the option `NTFY=123/urn:example-con:serviceId:MyPluginService/NotifyReceive` to set the device, service and action to be invoked when receive data from the remote is ready:
+
+```
+    +--------+   CONN www.example.com:80 etc.   +-----------+   connect   +-----------+
+    | Luup   |--------------------------------->|           |------------>|           |
+    | Plugin |                                  | SockProxy |             | www.exam- |
+    |        |                                  |           |             |   ple.com |
+    +--------+                                  +-----------+             +-----------+
+```
+
+The proxy will now be in "echo" mode. Any data sent to the proxy by the plugin will be sent (passed through) directly to the remote:
+
+```
+    +--------+   GET /api/v1/devices   +-----------+   GET /api/v1/devices   +-----------+
+    | Luup   |------------------------>|---------->|------------------------>|           |
+    | Plugin |                         | SockProxy |                         | www.exam- |
+    |        |                         |           |                         |   ple.com |
+    +--------+                         +-----------+                         +-----------+
+```
+
+Now, when the remote sends data back, it goes to the proxy first:
+
+```
+    +--------+                         +-----------+                         +-----------+
+    | Luup   |                         |           |                         |           |
+    | Plugin |                         | SockProxy |                         | www.exam- |
+    |        |                         |           |<------------------------|   ple.com |
+    +--------+                         +-----------+          data           +-----------+
+```
+
+The proxy holds this data and sends the notify action we requested to the device (in `CONN`) we specified:
+
+```
+    +--------+                         +-----------+                         +-----------+
+    | Luup   |                         |           |                         |           |
+    | Plugin |                         | SockProxy |                         | www.exam- |
+    |        |<------------------------|           |                         |   ple.com |
+    +--------+     NotifyReceive       +-----------+                         +-----------+
+                action to device 123
+```
+
+Device 123's implementation for this action responds by doing a `receive()` on the proxy socket, which collects the waiting data:
+
+```
+    +--------+       call recv()       +-----------+                         +-----------+
+    | Luup   |------------------------>|           |                         |           |
+    | Plugin |                         | SockProxy |                         | www.exam- |
+    |        |<------------------------|           |                         |   ple.com |
+    +--------+          data           +-----------+                         +-----------+
+```
+
 The benefit the proxy adds to the communication is the notification action. Luup plugins either have to use the rather dicey `<incoming>` implementation method, or poll the remote by trying to receive data periodically. The former allows you to only receive one byte at a time, which for large responses causes considerable overhead (I've had a plugin receive 30K byte responses from a remote where it took the Vera 5-6 seconds just to receive and buffer the entire message). The latter guarantees the perception of sluggish performance by the user, as the responsiveness of the plugin to data is limited by the polling frequency, and while polling frequently may create the illusion of performance, it's also incredibly wasteful of system resources.
 
 Once the data connection is established with the remote, there are no additional communications requirements or changes in the communication method or protocols. It's transparent (and I've confirmed this with SSL, WebSockets, and a number of other layered protocols).
