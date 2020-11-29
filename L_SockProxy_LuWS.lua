@@ -15,7 +15,7 @@ RB: 	fix for messages larger than 256 bytes.
 
 module("L_SockProxy_LuWS", package.seeall)
 
-_VERSION = 20140
+_VERSION = 20313
 
 debug_mode = false
 
@@ -310,7 +310,7 @@ end
 -- in which case each chunk from the source is sent as a fragment.
 function wssend( wsconn, opcode, s )
 	D("wssend(%1,%2,%3)", wsconn, opcode, s)
-	if not wsconn.connected then return false, "not connected" end
+	if not ( wsconn and wsconn.connected ) then return false, "not connected" end
 	if wsconn.closing then return false, "closing" end
 
 	if opcode == 0x08 then
@@ -558,7 +558,7 @@ end
 -- receiver believes there may immediately be more data to process.
 function wsreceive( wsconn )
 	D("wsreceive(%1)", wsconn)
-	if not wsconn.connected then return end
+	if not ( wsconn and wsconn.connected ) then return nil, "not connected" end
 	wsconn.socket:settimeout( 0, "b" )
 	wsconn.socket:settimeout( 0, "r" )
 	--[[ PHR 20140: Make sure we provide a number of bytes. Failing to do so apparently kicks-in the
