@@ -15,7 +15,7 @@ RB: 	fix for messages larger than 256 bytes.
 
 module("L_SockProxy_LuWS", package.seeall)
 
-_VERSION = 20313
+_VERSION = 20347
 
 debug_mode = false
 
@@ -216,7 +216,6 @@ function wsopen( url, handler, options )
 	wsconn.options = options
 
 	-- This call is async -- it returns immediately.
-	--??? options.create? for extensible socket creation?
 	local sock,err = options.connect( ip, port )
 	if not sock then
 		return false, err
@@ -224,18 +223,22 @@ function wsopen( url, handler, options )
 	wsconn.socket = sock
 	wsconn.socket:setoption( 'keepalive', true )
 	if proto == "wss" then
+		D("wsopen() preping for SSL connection")
 		local ssl = require "ssl"
 		local opts = {
-			mode=default( options.ssl_mode, 'client' ),
-			protocol=default( options.ssl_protocol, 'any' ),
-			verify=default( options.ssl_verify, 'none' ),
-			options=split( options.ssl_options, 'all' )
+			  mode=default( options.ssl_mode, 'client' )
+			, verify=default( options.ssl_verify, 'none' )
+			, protocol=default( options.ssl_protocol, 'any' ) -- (ssl._VERSION or ""):match( "^0%.[654]" ) and 'tlsv1_2' or 'any' )
+			, options=split( default( options.ssl_options, 'all' ) )
 		}
+		D("wsopen() wrap %1 %2", wsconn.socket, opts)
 		sock = ssl.wrap( wsconn.socket, opts )
+		D("wsopen() starting handshake");
 		if sock and sock:dohandshake() then
 			D("wsopen() successful SSL/TLS negotiation")
 			wsconn.socket = sock -- save wrapped socket
 		else
+			D("wsopen() failed SSL negotation")
 			wsconn.socket:close()
 			wsconn.socket = nil
 			return false, "Failed SSL negotation"
