@@ -228,7 +228,7 @@ function wsopen( url, handler, options )
 		local opts = {
 			  mode=default( options.ssl_mode, 'client' )
 			, verify=default( options.ssl_verify, 'none' )
-			, protocol=default( options.ssl_protocol, 'any' ) -- (ssl._VERSION or ""):match( "^0%.[654]" ) and 'tlsv1_2' or 'any' )
+			, protocol=default( options.ssl_protocol, (ssl._VERSION or ""):match( "^0%.[654]" ) and 'tlsv1_2' or 'any' )
 			, options=split( default( options.ssl_options, 'all' ) )
 		}
 		D("wsopen() wrap %1 %2", wsconn.socket, opts)
