@@ -190,6 +190,7 @@ The CONN command is really the main command for the proxy, and is likely the onl
                             of time. That is, if the pace is 2 seconds, the plugin should loop
                             attempting to read data for 2 seconds (at least) when notified, in case
                             more data comes in during the notification pause.
+    PRTO=[tcp|udp]          Protocol for connection, either TCP (the default) or UDP.
 
 When a host first connects to the proxy, the initial greeting is sent. This greeting is always
 `OK TOGGLEDBITS-SOCKPROXY n pid`, where _n_ is the integer version number of the proxy. If your
