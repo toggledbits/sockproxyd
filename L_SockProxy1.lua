@@ -1,10 +1,10 @@
--- L_SockProxy1.lua, (C) 2020 Patrick H. Rigney, All Rights Reserved
+-- L_SockProxy1.lua, (C) 2020-2023 Patrick H. Rigney, All Rights Reserved
 
 local PLUGIN_NAME =		"SockProxy1"
 local PLUGIN_ID = 		9302
-local PLUGIN_VERSION =	"1.0-20225"
+local PLUGIN_VERSION =	"1.0-23068"
 
-local _CONFIGVERSION = 20140
+local _CONFIGVERSION = 20145
 
 local isOpenLuup = luup.openLuup ~= nil
 local pluginDevice

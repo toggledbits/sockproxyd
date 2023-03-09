@@ -6,16 +6,13 @@
 
 	NOTA BENE: 64-bit payload length not supported.
 
-RB: 	fix for messages larger than 256 bytes.
-	fix for handling ping request
-	removed chat option from negotiate.
-
+	See CHANGELOG.md for release notes
 --]]
 --luacheck: std lua51,module,read globals luup,ignore 542 611 612 614 111/_,no max line length
 
 module("L_SockProxy_LuWS", package.seeall)
 
-_VERSION = 20347
+_VERSION = 20358
 
 debug_mode = false
 
@@ -41,7 +38,7 @@ local DEFAULTMSGTIMEOUT = 0 -- drop connection if no message in this time (0=no 
 
 local timenow = socket.gettime or os.time -- use hi-res time if available
 local unpack = unpack or table.unpack -- luacheck: ignore 143
-local LOG = luup.log or ( function(msg,level) print(level or 50,msg) end )
+local LOG = (luup and luup.log) or ( function(msg,level) print(level or 50,msg) end )
 
 function dump(t, seen)
 	if t == nil then return "nil" end
@@ -115,13 +112,20 @@ local function wsupgrade( wsconn )
 	D("wsupgrade(%1)", wsconn)
 	local mime = require "mime"
 
+	-- Upgrade headers. Map/dict provided; flatten to array and join.
+	local uhead = {}
+	for k,v in pairs( wsconn.options.upgrade_headers or {} ) do
+		table.insert( uhead, k .. ": " .. v )
+	end
+	uhead = table.concat( uhead, "\r\n" );
+
 	-- Generate key/nonce, 16 bytes base64-encoded
 	local key = {}
 	for k=1,16 do key[k] = string.char( math.random( 0, 255 ) ) end
 	key = mime.b64( table.concat( key, "" ) )
 	-- Ref: https://stackoverflow.com/questions/18265128/what-is-sec-websocket-key-for
-	local req = string.format("GET %s HTTP/1.1\r\nHost: %s\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: %s\r\nSec-WebSocket-Version: 13\r\n\r\n",
-		wsconn.path, wsconn.ip, key)
+	local req = string.format("GET %s HTTP/1.1\r\nHost: %s\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: %s\r\nSec-WebSocket-Version: 13\r\n%s\r\n",
+		wsconn.path, wsconn.ip, key, uhead)
 
 	-- Send request.
 	D("wsupgrade() sending %1", req)
@@ -176,7 +180,7 @@ local function connect( ip, port )
 	if r then
 		return sock
 	end
-	sock:close()
+	pcall( function() sock:close() end ) -- crash resistant
 	return nil, string.format("Connection to %s:%s failed: %s", ip, port, tostring(e))
 end
 
@@ -189,6 +193,7 @@ function wsopen( url, handler, options )
 	options.use_masking = default( options.use_masking, true ) -- RFC required, but settable
 	options.connect = default( options.connect, connect )
 	options.control_handler = default( options.control_handler, nil )
+	options.upgrade_headers = default( options.upgrade_headers, nil )
 
 	local port
 	local proto, ip, ps = url:match("^(wss?)://([^:/]+)(.*)")
@@ -245,10 +250,12 @@ function wsopen( url, handler, options )
 		end
 	end
 	D("wsopen() upgrading connection to WebSocket")
+	local st
 	st,err = wsupgrade( wsconn )
 	if st then
 		wsconn.connected = true
 		wsconn.lastMessage = timenow()
+		wsconn.lastPing = timenow()
 		local m = getmetatable(wsconn) or {}
 		m.__tostring = function( o ) return string.format("luws-websock[%s:%s]", o.ip, o.port) end
 		-- m.__newindex = function( o, n, v ) error("Immutable luws-websock, can't set "..n) end
@@ -256,7 +263,7 @@ function wsopen( url, handler, options )
 		D("wsopen() successful WebSocket startup, wsconn %1", wsconn)
 		return wsconn
 	end
-	wsconn.socket:close()
+	pcall( function() wsconn.socket:close() end ) -- crash-resistant
 	wsconn.socket = nil
 	return false, err
 end
@@ -300,10 +307,9 @@ local function send_frame( wsconn, opcode, fin, s )
 	wsconn.socket:settimeout( 5, "b" )
 	wsconn.socket:settimeout( 5, "r" )
 	-- ??? need retry while nb < payload length
-	while true do
+	while #frame > 0 do
 		local nb,err = wsconn.socket:send( frame )
 		if not nb then return false, "send error: "..tostring(err) end
-		if nb >= #frame then break end
 		frame = frame:sub( nb + 1 )
 	end
 	return true
@@ -364,10 +370,10 @@ function wsclose( wsconn )
 			wssend( wsconn, 0x08, "" )
 		end
 		if wsconn.socket then
-			wsconn.socket:close()
+			pcall( function() wsconn.socket:close() end ) -- crash-resistant
 			wsconn.socket = nil
-			wsconn.connected = false
 		end
+		wsconn.connected = false
 	end
 end
 
@@ -387,10 +393,12 @@ local function handle_control_frame( wsconn, opcode, data )
 		-- Notify
 		pcall( wsconn.msghandler, wsconn, false, "receiver error: closed",
 			unpack(wsconn.options.handler_args or {}) )
-	elseif opcode == 0x09 then -- ping
-		wssend( wsconn, 0x0a, "" ) -- reply with pong
+	elseif opcode == 0x09 then
+		-- Ping. Reply with pong.
+		wssend( wsconn, 0x0a, "" ) 
+	elseif opcode == 0x0a then
+		-- Pong; no action
 	else
-		-- 0x0a pong, no action
 		-- Other unsupported control frame
 	end
 end
@@ -403,6 +411,7 @@ local function wshandlefragment( fin, op, data, wsconn )
 	if fin then
 		-- FIN frame
 		wsconn.lastMessage = timenow()
+		wsconn.lastPing = timenow() -- any complete frame advances ping timer
 		if op >= 8 then
 			handle_control_frame( wsconn, op, data )
 			return
@@ -423,11 +432,14 @@ local function wshandlefragment( fin, op, data, wsconn )
 			D("wshandlefragment() buffer overflow, have %1, incoming %2, max %3; message truncated.",
 				#wsconn.msg, #data, wsconn.options.max_payload_size)
 		end
-		if maxn > 0 then wsconn.msg = wsconn.msg .. data.sub(1, maxn) end
+		if maxn > 0 then wsconn.msg = wsconn.msg .. data:sub(1, maxn) end
 		D("wshandlefragment() dispatch %2 byte message for op %1", wsconn.msgop, #wsconn.msg)
 		wsconn.lastMessage = timenow()
-		pcall( wsconn.msghandler, wsconn, wsconn.msgop, wsconn.msg,
+		local ok, err = pcall( wsconn.msghandler, wsconn, wsconn.msgop, wsconn.msg,
 			unpack(wsconn.options.handler_args or {}) )
+		if not ok then
+			L("wsandlefragment() message handler threw error:", err)
+		end
 		wsconn.msg = nil
 	else
 		-- No FIN
@@ -446,7 +458,7 @@ local function wshandlefragment( fin, op, data, wsconn )
 				L("wshandlefragment() buffer overflow, have %1, incoming %2, max %3; message truncated",
 					#wsconn.msg, #data, wsconn.options.max_payload_size)
 			end
-			if maxn > 0 then wsconn.msg = wsconn.msg .. data.sub(1, maxn) end
+			if maxn > 0 then wsconn.msg = wsconn.msg .. data:sub(1, maxn) end
 		end
 	end
 end
@@ -595,7 +607,7 @@ function wsreceive( wsconn )
 	return #nb > 0, #nb -- data handled, maybe more?
 end
 
--- Reset receiver state. Brutal resync; may or may be usable, but worth having the option.
+-- Reset receiver state. Brutal resync; may or may not be usable, but worth having the option.
 function wsreset( wsconn )
 	D("wsreset(%1)", wsconn)
 	if wsconn then
@@ -603,4 +615,9 @@ function wsreset( wsconn )
 		wsconn.frag = nil -- gc eligible
 		wsconn.readstate = STATE_START -- ready for next frame
 	end
+end
+
+function wslastping( wsconn )
+	D("wslastping(%1)", wsconn)
+	return wsconn and wsconn.lastPing or 0
 end

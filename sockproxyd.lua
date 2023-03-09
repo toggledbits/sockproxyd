@@ -4,7 +4,7 @@
 	proxy that receives data from one connection and transmits it to another. More importantly,
 	it notifies, via action invocation, a Vera device that data is waiting on the socket.
 
-	Copyright (C) 2020 Patrick H. Rigney, All Rights Reserved
+	Copyright (C) 2020-2023 Patrick H. Rigney, All Rights Reserved
 
 	See https://
 --]]
@@ -13,7 +13,7 @@ socket = require "socket"
 
 _PLUGIN_NAME = "sockproxyd"
 _VERSION = 1 -- version of the protocol, which is what we declare to clients
-_BUILD = 20138
+_BUILD = 23068
 
 DEFAULT_BLOCKSIZE = 2048
 DEFAULT_PORT = 2504
@@ -263,12 +263,22 @@ function processCONN( client, cmd )
 		return false
 	end
 	rport = tonumber( rport ) or 80
+	client.port = rport
+	client.proto = "tcp"
+
 	-- Handle options
-	local opts = split( rest:gsub("^ +","") , " " )
+	local opts = split( rest:gsub( "[ \r\n]+$", ""):gsub("^ +", "") , " " )
 	for _,opt in ipairs( opts ) do
 		local k,v = opt:match( "^([^=]+)=(.*)" )
 		if k == "RTIM" then
 			client.remotetimeout = tonumber(v) or client.remotetimeout
+		elseif k == "PRTO" then
+			client.proto = v:lower()
+			if not ( client.proto == "tcp" or client.proto == "udp" ) then
+				L({level=2,"Client %1 attempted protocol %2, not supported"}, client.id, client.proto)
+				client.sock:send("ERR CONN Invalid protocol "..client.proto.."\n")
+				return false
+			end
 		elseif k == "BLKS" then
 			client.block = tonumber(v) or client.block
 		elseif k == "PACE" then
@@ -285,14 +295,29 @@ function processCONN( client, cmd )
 			return false
 		end
 	end
+
+	if client.proto == "udp" then
+		client.remote = socket.udp()
+		client.remotehost = rip .. ":" .. rport
+		client.remoteip = rip
+		client.remoteport = rport
+		client.lastremote = timenow()
+		client.peertimeout = client.remotetimeout
+		L("Client %1 from %2 UDP with %3:%4", client.id, client.peer, rip, rport)
+		return true
+	end
+
+	-- TCP connection
 	local remote = socket.tcp()
 	remote:settimeout( 5 )
 	-- remote:setoption('keepalive', true)
-	L("Client %1 from %2 attempting remote to %3:%4", client.id, client.peer, rip, rport)
+	L("Client %1 from %2 TCP with %3:%4", client.id, client.peer, rip, rport)
 	local st, err = remote:connect( rip, rport )
 	if st then
 		client.remote = remote
 		client.remotehost = rip .. ":" .. rport
+		client.remoteip = rip
+		client.remoteport = rport
 		client.lastremote = timenow()
 		client.peertimeout = client.remotetimeout
 		D("handleClientData() client %1 now with remote %2:%3", client.id, rip, rport)
@@ -300,7 +325,7 @@ function processCONN( client, cmd )
 	end
 	remote:close()
 	client.sock:send("ERR CONN "..tostring(err).."\n")
-	L("Client %1 connection to %2:%3 failed: %4", client.id, rip, rport, err)
+	L("Client %1 %5 connection to %2:%3 failed: %4", client.id, rip, rport, err, client.proto)
 	return false
 end
 
@@ -400,7 +425,10 @@ CONN host:port [key=value ...] - Connect to remote (enters echo mode, must be la
 ]] )
 			return true
 		elseif cmd == "CAPA" then
-			client.sock:send("OK CAPA BLKS RTIM NTFY CONN\n")
+			client.sock:send("OK CAPA BLKS RTIM NTFY CONN UDP\n")
+			return true
+		elseif cmd == "BILD" then
+			client.sock:send("OK ".._BUILD.."\n")
 			return true
 		elseif cmd == "QUIT" then
 			client.sock:send( "OK QUIT\n")
@@ -415,10 +443,20 @@ CONN host:port [key=value ...] - Connect to remote (enters echo mode, must be la
 		end
 	elseif client.state == 2 then
 		-- ECHO mode. We receive data from client and send it to remote.
-		client.remote:send( data )
-		client.remote_sent = (client.remote_sent or 0) + #data
-		D("handleClientData() remote -> %1", data)
-		return true
+		local res, err
+		if client.proto == "udp" then
+			res, err = client.remote:sendto( data, client.remoteip, client.remoteport )
+		else
+			res, err = client.remote:send( data )
+		end
+		if res then
+			client.remote_sent = (client.remote_sent or 0) + #data
+			D("handleClientData() remote -> %1", data)
+			return true
+		else
+			E("handleClientData() failed to send %1 to %2: %3", client.proto, client.host, err )
+			return false
+		end
 	end
 	D("handleClientData() invalid state")
 	return false
@@ -428,7 +466,9 @@ function closeClient( client )
 	D("closeClient(%1)", client.id)
 	if client.remote then
 		client.remote:settimeout(0)
-		client.remote:shutdown("both")
+		if "udp" ~= client.proto then
+			client.remote:shutdown("both")
+		end
 		client.remote:close()
 		client.remote = nil
 	end
